@@ -1,132 +1,142 @@
 import { useState, useEffect } from 'react'
 
-const RAPIDAPI_KEY = '61137ff3cfmsh3c349b4d3d87940p139f00jsn9c74e5c883b9'
-const API_HOST = 'tennis-api-atp-wta-itf.p.rapidapi.com'
+const KEY  = '61137ff3cfmsh3c349b4d3d87940p139f00jsn9c74e5c883b9'
+const HOST = 'tennis-api-atp-wta-itf.p.rapidapi.com'
 const BASE = 'https://tennis-api-atp-wta-itf.p.rapidapi.com/tennis/v2'
 
 const get = async (url) => {
-  const r = await fetch(url, { headers: { 'X-RapidAPI-Key': RAPIDAPI_KEY, 'X-RapidAPI-Host': API_HOST } })
-  if (!r.ok) throw new Error(`${r.status}`)
+  const r = await fetch(url, { headers: { 'X-RapidAPI-Key': KEY, 'X-RapidAPI-Host': HOST } })
+  if (!r.ok) throw new Error(`${r.status} ${url}`)
   const j = await r.json()
-  // L'API wrappa tutto in {"data": ...}
   return j?.data ?? j
 }
 
-// Giocatori — gli ID reali li troviamo via search al primo caricamento
-const PLAYER_NAMES = [
-  { query: 'Sinner',     name: 'Jannik Sinner',     flag: '🇮🇹', tour: 'atp' },
-  { query: 'Alcaraz',    name: 'Carlos Alcaraz',    flag: '🇪🇸', tour: 'atp' },
-  { query: 'Djokovic',   name: 'Novak Djokovic',    flag: '🇷🇸', tour: 'atp' },
-  { query: 'Musetti',    name: 'Lorenzo Musetti',   flag: '🇮🇹', tour: 'atp' },
-  { query: 'Berrettini', name: 'Matteo Berrettini', flag: '🇮🇹', tour: 'atp' },
+// Giocatori con ID da trovare tramite getPlayers con filtro nome
+const TARGETS = [
+  { search: 'Sinner Jannik',     name: 'Jannik Sinner',     flag: '🇮🇹', tour: 'atp' },
+  { search: 'Alcaraz Carlos',    name: 'Carlos Alcaraz',    flag: '🇪🇸', tour: 'atp' },
+  { search: 'Djokovic Novak',    name: 'Novak Djokovic',    flag: '🇷🇸', tour: 'atp' },
+  { search: 'Musetti Lorenzo',   name: 'Lorenzo Musetti',   flag: '🇮🇹', tour: 'atp' },
+  { search: 'Berrettini Matteo', name: 'Matteo Berrettini', flag: '🇮🇹', tour: 'atp' },
 ]
 
 const fmtDate = (s) => {
   if (!s) return '–'
   const d = new Date(s)
-  return isNaN(d) ? s : d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
+  return isNaN(d) ? s : d.toLocaleDateString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric' })
 }
 
 const MOCK = {
-  profile: { full_name: 'Jannik Sinner', country: 'Italy', birth_date: '2001-08-16', height: 188, plays: 'Destro', turned_pro: 2018, coach: 'Simone Vagnozzi' },
-  ranking: { rank: 1, points: 11330, movement: 0 },
-  titles: { total: 18, current_year: 4, grand_slams: 2 },
+  profile: { full_name:'Jannik Sinner', country:'Italy', birth_date:'2001-08-16', height:188, plays:'Destro', turned_pro:2018, coach:'Simone Vagnozzi' },
+  ranking: { rank:1, points:11330, movement:0 },
+  titles:  { total:18, current_year:4, grand_slams:2 },
   recent: [
-    { tournament: 'Australian Open', result: 'W', opponent: 'Zverev A.', score: '6-3 7-6 6-3', date: '2025-01-26' },
-    { tournament: 'US Open',         result: 'W', opponent: 'Fritz T.',  score: '6-3 6-4 7-5', date: '2024-09-08' },
-    { tournament: 'Rotterdam',       result: 'W', opponent: 'De Minaur A.', score: '7-5 6-4', date: '2025-02-09' },
-    { tournament: 'Miami Open',      result: 'L', opponent: 'Alcaraz C.', score: '2-6 6-7',  date: '2024-04-07' },
-    { tournament: 'Cincinnati',      result: 'L', opponent: 'Fritz T.',  score: '4-6 4-6',   date: '2024-08-17' },
+    { tournament:'Australian Open', result:'W', opponent:'Zverev A.',    score:'6-3 7-6 6-3', date:'2025-01-26' },
+    { tournament:'US Open',         result:'W', opponent:'Fritz T.',     score:'6-3 6-4 7-5', date:'2024-09-08' },
+    { tournament:'Rotterdam',       result:'W', opponent:'De Minaur A.', score:'7-5 6-4',     date:'2025-02-09' },
+    { tournament:'Miami Open',      result:'L', opponent:'Alcaraz C.',   score:'2-6 6-7',     date:'2024-04-07' },
+    { tournament:'Cincinnati',      result:'L', opponent:'Fritz T.',     score:'4-6 4-6',     date:'2024-08-17' },
   ],
   upcoming: [
-    { tournament: "Internazionali BNL d'Italia", surface: 'Clay',  start: '2025-05-07', category: 'Masters 1000' },
-    { tournament: 'Roland Garros',               surface: 'Clay',  start: '2025-05-25', category: 'Grand Slam'   },
-    { tournament: 'Wimbledon',                   surface: 'Grass', start: '2025-06-30', category: 'Grand Slam'   },
+    { tournament:"Internazionali BNL d'Italia", surface:'Clay',  start:'2025-05-07', category:'Masters 1000' },
+    { tournament:'Roland Garros',               surface:'Clay',  start:'2025-05-25', category:'Grand Slam'   },
+    { tournament:'Wimbledon',                   surface:'Grass', start:'2025-06-30', category:'Grand Slam'   },
   ],
 }
 
-const Pill = ({ label, value, color = '#00c896' }) => (
-  <div style={{ background: '#0a0a0a', border: `1px solid ${color}22`, borderRadius: 8, padding: '12px 16px', textAlign: 'center', flex: 1, minWidth: 90 }}>
-    <div style={{ color, fontSize: 22, fontWeight: 700, fontFamily: "'DM Mono',monospace", letterSpacing: -1 }}>{value}</div>
-    <div style={{ color: '#666', fontSize: 11, marginTop: 3, textTransform: 'uppercase', letterSpacing: 1 }}>{label}</div>
+// Cerca ID reale scorrendo le pagine di getPlayers filtrate per paese
+const findPlayerId = async (target) => {
+  // Mappa cognome → filtro paese
+  const countryMap = { 'Sinner':'ITA', 'Alcaraz':'ESP', 'Djokovic':'SRB', 'Musetti':'ITA', 'Berrettini':'ITA' }
+  const surname = target.search.split(' ')[0]
+  const country = countryMap[surname] || 'ITA'
+  
+  for (let page = 1; page <= 5; page++) {
+    try {
+      const data = await get(`${BASE}/atp/player?filter=PlayerGroup:singles;PlayerCountry:${country}&pageSize=50&pageNo=${page}`)
+      const list = Array.isArray(data) ? data : (data?.players || [])
+      if (!list.length) break
+      
+      const match = list.find(p => {
+        const n = (p.name || '').toLowerCase()
+        const parts = target.search.toLowerCase().split(' ')
+        return parts.every(part => n.includes(part))
+      })
+      if (match) return match
+    } catch { break }
+  }
+  return null
+}
+
+const Pill = ({ label, value, color='#00c896' }) => (
+  <div style={{ background:'#0a0a0a', border:`1px solid ${color}22`, borderRadius:8, padding:'12px 16px', textAlign:'center', flex:1, minWidth:90 }}>
+    <div style={{ color, fontSize:22, fontWeight:700, fontFamily:"'DM Mono',monospace", letterSpacing:-1 }}>{value}</div>
+    <div style={{ color:'#666', fontSize:11, marginTop:3, textTransform:'uppercase', letterSpacing:1 }}>{label}</div>
   </div>
 )
 
 const Sec = ({ title, children }) => (
-  <div style={{ marginTop: 24 }}>
-    <div style={{ fontSize: 11, color: '#444', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 12, paddingBottom: 8, borderBottom: '1px solid #1a1a1a' }}>{title}</div>
+  <div style={{ marginTop:24 }}>
+    <div style={{ fontSize:11, color:'#444', textTransform:'uppercase', letterSpacing:2, marginBottom:12, paddingBottom:8, borderBottom:'1px solid #1a1a1a' }}>{title}</div>
     {children}
   </div>
 )
 
 const Badge = ({ r }) => {
-  const c = { W: '#00c896', L: '#ff4444', F: '#f59e0b', SF: '#f59e0b', QF: '#888' }[r] || '#555'
-  return <span style={{ display: 'inline-block', background: c+'22', color: c, border: `1px solid ${c}44`, borderRadius: 4, padding: '1px 7px', fontSize: 11, fontWeight: 700, fontFamily: "'DM Mono',monospace", minWidth: 28, textAlign: 'center' }}>{r}</span>
+  const c = { W:'#00c896', L:'#ff4444', F:'#f59e0b', SF:'#f59e0b', QF:'#888' }[r] || '#555'
+  return <span style={{ display:'inline-block', background:c+'22', color:c, border:`1px solid ${c}44`, borderRadius:4, padding:'1px 7px', fontSize:11, fontWeight:700, fontFamily:"'DM Mono',monospace", minWidth:28, textAlign:'center' }}>{r}</span>
 }
 
 export default function App() {
-  const [players, setPlayers] = useState([])   // con ID reali dopo search
-  const [sel, setSel] = useState(null)
-  const [data, setData] = useState(null)
+  const [players, setPlayers] = useState([])
+  const [sel, setSel]         = useState(null)
+  const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
-  const [mock, setMock] = useState(false)
-  const [err, setErr] = useState(null)
+  const [initDone, setInitDone] = useState(false)
+  const [mock, setMock]       = useState(false)
+  const [err, setErr]         = useState(null)
 
-  // Step 1: cerca gli ID reali via /search
+  // Risolvi ID reali all'avvio
   useEffect(() => {
-    const resolveIds = async () => {
-      try {
-        const resolved = await Promise.all(
-          PLAYER_NAMES.map(async (p) => {
-            try {
-              const res = await get(`${BASE}/atp/search?query=${encodeURIComponent(p.query)}`)
-              const list = Array.isArray(res) ? res : (res?.players || [])
-              // Trova il match per cognome esatto
-              const match = list.find(r =>
-                r.name?.toLowerCase().includes(p.query.toLowerCase())
-              )
-              return match ? { ...p, id: match.id, name: match.name } : null
-            } catch { return null }
-          })
-        )
-        const valid = resolved.filter(Boolean)
-        if (valid.length === 0) throw new Error('Nessun giocatore trovato')
-        setPlayers(valid)
-        setSel(valid[0])
-      } catch (e) {
-        // Fallback: usa MOCK con ID noti dalla doc
-        const fallback = PLAYER_NAMES.map((p, i) => ({ ...p, id: [106421,104925,100644,103819,105526][i] }))
-        setPlayers(fallback)
-        setSel(fallback[0])
-      }
+    const init = async () => {
+      const resolved = await Promise.all(
+        TARGETS.map(async (t) => {
+          const match = await findPlayerId(t)
+          if (match) return { ...t, id: match.id, name: match.name }
+          return null
+        })
+      )
+      const valid = resolved.filter(Boolean)
+      const list = valid.length > 0 ? valid : TARGETS.map((t,i) => ({ ...t, id: [999,999,999,999,999][i] }))
+      setPlayers(list)
+      setSel(list[0])
+      setInitDone(true)
     }
-    resolveIds()
+    init()
   }, [])
 
-  // Step 2: carica dati giocatore selezionato
+  // Carica dati giocatore selezionato
   useEffect(() => {
-    if (!sel) return
+    if (!sel || !initDone) return
     const load = async () => {
       setLoading(true); setErr(null); setData(null); setMock(false)
       try {
         const t = sel.tour
-        const [profileRaw, titlesRaw, pastRaw, fixRaw] = await Promise.allSettled([
+        const [pR, tR, mR, fR] = await Promise.allSettled([
           get(`${BASE}/${t}/player/profile/${sel.id}?include=ranking,country`),
           get(`${BASE}/${t}/player/titles/${sel.id}`),
-          get(`${BASE}/${t}/player/past-matches/${sel.id}?pageSize=5`),
-          get(`${BASE}/${t}/fixtures/player/${sel.id}?include=tournament,round&pageSize=3`),
+          get(`${BASE}/${t}/player/past-matches/${sel.id}?pageSize=5&filter=PlayerGroup:singles`),
+          get(`${BASE}/${t}/fixtures/player/${sel.id}?include=tournament,round&pageSize=3&filter=PlayerGroup:singles`),
         ])
 
-        const profile = profileRaw.status === 'fulfilled' ? profileRaw.value : null
-        if (!profile || profile.playerStatus === 'Inactive' && !profile.currentRank) {
-          throw new Error(`ID ${sel.id} non valido per questo giocatore`)
-        }
+        const profile  = pR.status==='fulfilled' ? pR.value : null
+        const titles   = tR.status==='fulfilled' ? (Array.isArray(tR.value) ? tR.value : tR.value?.data||[]) : []
+        const past     = mR.status==='fulfilled' ? (Array.isArray(mR.value) ? mR.value : mR.value?.data||[]) : []
+        const fixtures = fR.status==='fulfilled' ? (Array.isArray(fR.value) ? fR.value : fR.value?.data||[]) : []
 
-        const titles   = titlesRaw.status === 'fulfilled' ? (Array.isArray(titlesRaw.value) ? titlesRaw.value : titlesRaw.value?.data || []) : []
-        const past     = pastRaw.status   === 'fulfilled' ? (Array.isArray(pastRaw.value)   ? pastRaw.value   : pastRaw.value?.data   || []) : []
-        const fixtures = fixRaw.status    === 'fulfilled' ? (Array.isArray(fixRaw.value)    ? fixRaw.value    : fixRaw.value?.data    || []) : []
+        if (!profile) throw new Error('Profilo non trovato')
 
-        const yr = new Date().getFullYear()
+        const yr    = new Date().getFullYear()
         const slams = ['Australian Open','Roland Garros','Wimbledon','US Open']
 
         setData({
@@ -146,40 +156,44 @@ export default function App() {
           },
           titles: {
             total:        titles.length || '–',
-            current_year: titles.filter(t => { const y = t.year || (t.date ? new Date(t.date).getFullYear() : 0); return y === yr }).length,
-            grand_slams:  titles.filter(t => slams.some(s => (t.tournament?.name || t.name || '').includes(s))).length,
+            current_year: titles.filter(t => { const y=t.year||(t.date?new Date(t.date).getFullYear():0); return y===yr }).length,
+            grand_slams:  titles.filter(t => slams.some(s => (t.tournament?.name||t.name||'').includes(s))).length,
           },
           recent: past.slice(0,5).map(m => {
-            const won = String(m.player1Id) === String(sel.id)
+            const won = String(m.player1Id)===String(sel.id)
             return {
-              tournament: m.tournament?.name || '–',
-              result:     won ? 'W' : 'L',
-              opponent:   won ? (m.player2?.name||'–') : (m.player1?.name||'–'),
-              score:      m.result || '–',
-              date:       m.date || '',
+              tournament: m.tournament?.name||'–',
+              result:     won?'W':'L',
+              opponent:   won?(m.player2?.name||'–'):(m.player1?.name||'–'),
+              score:      m.result||'–',
+              date:       m.date||'',
             }
           }),
           upcoming: fixtures.slice(0,3).map(f => ({
-            tournament: f.tournament?.name || '–',
-            surface:    f.tournament?.court?.name || '–',
-            start:      f.date || '',
-            category:   f.tournament?.rank?.name || '–',
+            tournament: f.tournament?.name||'–',
+            surface:    f.tournament?.court?.name||'–',
+            start:      f.date||'',
+            category:   f.tournament?.rank?.name||'–',
           })),
         })
-      } catch (e) {
-        setData(MOCK); setMock(true); setErr(`API: ${e.message} — dati demo`)
+      } catch(e) {
+        setData(MOCK); setMock(true); setErr(`Dati non disponibili per questo giocatore — mostro dati demo Sinner`)
       } finally {
         setLoading(false)
       }
     }
     load()
-  }, [sel])
+  }, [sel, initDone])
 
-  if (!sel) return <div style={{ background:'#050505', color:'#444', minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'monospace' }}>Inizializzazione...</div>
+  if (!initDone) return (
+    <div style={{ background:'#050505', color:'#444', minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'monospace', fontSize:13 }}>
+      🎾 Inizializzazione giocatori...
+    </div>
+  )
 
   return (
     <div style={{ fontFamily:"'DM Sans',-apple-system,sans-serif", background:'#050505', color:'#e8e8e8', minHeight:'100vh', padding:'0 0 40px' }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');*{box-sizing:border-box;margin:0;padding:0}.pb:hover{border-color:#00c89644!important;background:#0d1f1a!important}.mr:hover{background:#0d0d0d!important}`}</style>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');*{box-sizing:border-box;margin:0;padding:0}.pb{transition:all .15s}.pb:hover{border-color:#00c89644!important;background:#0d1f1a!important}.mr:hover{background:#0d0d0d!important}`}</style>
 
       <div style={{ borderBottom:'1px solid #111', padding:'16px 20px', display:'flex', alignItems:'center', gap:10 }}>
         <span style={{ fontSize:18 }}>🎾</span>
@@ -191,9 +205,9 @@ export default function App() {
         <div style={{ display:'flex', gap:8, minWidth:'max-content' }}>
           {players.map(p => (
             <button key={p.id} className="pb" onClick={() => setSel(p)} style={{
-              background: sel.id===p.id ? '#0d1f1a' : 'transparent',
-              border: `1px solid ${sel.id===p.id ? '#00c896' : '#1a1a1a'}`,
-              color: sel.id===p.id ? '#00c896' : '#666',
+              background: sel?.id===p.id ? '#0d1f1a' : 'transparent',
+              border: `1px solid ${sel?.id===p.id ? '#00c896' : '#1a1a1a'}`,
+              color: sel?.id===p.id ? '#00c896' : '#666',
               borderRadius:8, padding:'6px 14px', cursor:'pointer', fontSize:13,
               whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:6,
             }}>
@@ -204,7 +218,12 @@ export default function App() {
       </div>
 
       <div style={{ padding:'0 20px' }}>
-        {loading && <div style={{ textAlign:'center', padding:60, color:'#333' }}><div style={{ fontSize:28, marginBottom:12 }}>⏳</div><div style={{ fontSize:13 }}>Caricamento...</div></div>}
+        {loading && (
+          <div style={{ textAlign:'center', padding:60, color:'#333' }}>
+            <div style={{ fontSize:28, marginBottom:12 }}>⏳</div>
+            <div style={{ fontSize:13 }}>Caricamento...</div>
+          </div>
+        )}
         {err && <div style={{ background:'#1a0a0a', border:'1px solid #ff444422', borderRadius:8, padding:12, color:'#ff6666', fontSize:12, marginBottom:12 }}>⚠️ {err}</div>}
 
         {data && !loading && <>
@@ -224,12 +243,12 @@ export default function App() {
             <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
               <Pill label="Ranking ATP" value={`#${data.ranking.rank}`} />
               <Pill label="Punti" value={typeof data.ranking.points==='number' ? data.ranking.points.toLocaleString('it-IT') : data.ranking.points} />
-              <Pill label="Titoli totali" value={data.titles.total} color="#f59e0b" />
-              <Pill label="Titoli 2025"  value={data.titles.current_year} color="#f59e0b" />
-              <Pill label="Slam"         value={data.titles.grand_slams}  color="#f59e0b" />
+              <Pill label="Titoli totali" value={data.titles.total}        color="#f59e0b" />
+              <Pill label="Titoli 2025"   value={data.titles.current_year} color="#f59e0b" />
+              <Pill label="Slam"          value={data.titles.grand_slams}  color="#f59e0b" />
             </div>
-            {data.ranking.movement !== 0 && (
-              <div style={{ marginTop:10, fontSize:12, color: data.ranking.movement>0?'#00c896':'#ff4444' }}>
+            {!!data.ranking.movement && (
+              <div style={{ marginTop:10, fontSize:12, color:data.ranking.movement>0?'#00c896':'#ff4444' }}>
                 {data.ranking.movement>0?'▲':'▼'} {Math.abs(data.ranking.movement)} posizioni questa settimana
               </div>
             )}

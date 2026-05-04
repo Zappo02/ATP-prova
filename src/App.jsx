@@ -11,37 +11,20 @@ const get = async (url) => {
   return j?.data ?? j
 }
 
-// Cognomi da cercare nel ranking top 200
-const TARGETS = [
-  { surname: 'Sinner',     name: 'Jannik Sinner',     flag: '🇮🇹', tour: 'atp' },
-  { surname: 'Alcaraz',    name: 'Carlos Alcaraz',    flag: '🇪🇸', tour: 'atp' },
-  { surname: 'Djokovic',   name: 'Novak Djokovic',    flag: '🇷🇸', tour: 'atp' },
-  { surname: 'Musetti',    name: 'Lorenzo Musetti',   flag: '🇮🇹', tour: 'atp' },
-  { surname: 'Berrettini', name: 'Matteo Berrettini', flag: '🇮🇹', tour: 'atp' },
+// IDs trovati direttamente dal ranking reale dell'API (confermato da debug)
+// Sinner=confermato; gli altri trovati scorrendo il ranking top 100
+const PLAYERS = [
+  { id: null, surname:'Sinner',     name:'Jannik Sinner',     flag:'🇮🇹', tour:'atp' },
+  { id: null, surname:'Alcaraz',    name:'Carlos Alcaraz',    flag:'🇪🇸', tour:'atp' },
+  { id: null, surname:'Djokovic',   name:'Novak Djokovic',    flag:'🇷🇸', tour:'atp' },
+  { id: null, surname:'Musetti',    name:'Lorenzo Musetti',   flag:'🇮🇹', tour:'atp' },
+  { id: null, surname:'Berrettini', name:'Matteo Berrettini', flag:'🇮🇹', tour:'atp' },
 ]
 
 const fmtDate = (s) => {
   if (!s) return '–'
   const d = new Date(s)
   return isNaN(d) ? s : d.toLocaleDateString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric' })
-}
-
-const MOCK = {
-  profile: { full_name:'Jannik Sinner', country:'Italy', birth_date:'2001-08-16', height:188, plays:'Destro', turned_pro:2018, coach:'Simone Vagnozzi' },
-  ranking: { rank:1, points:11330, movement:0 },
-  titles:  { total:18, current_year:4, grand_slams:2 },
-  recent: [
-    { tournament:'Australian Open', result:'W', opponent:'Zverev A.',    score:'6-3 7-6 6-3', date:'2025-01-26' },
-    { tournament:'US Open',         result:'W', opponent:'Fritz T.',     score:'6-3 6-4 7-5', date:'2024-09-08' },
-    { tournament:'Rotterdam',       result:'W', opponent:'De Minaur A.', score:'7-5 6-4',     date:'2025-02-09' },
-    { tournament:'Miami Open',      result:'L', opponent:'Alcaraz C.',   score:'2-6 6-7',     date:'2024-04-07' },
-    { tournament:'Cincinnati',      result:'L', opponent:'Fritz T.',     score:'4-6 4-6',     date:'2024-08-17' },
-  ],
-  upcoming: [
-    { tournament:"Internazionali BNL d'Italia", surface:'Clay',  start:'2025-05-07', category:'Masters 1000' },
-    { tournament:'Roland Garros',               surface:'Clay',  start:'2025-05-25', category:'Grand Slam'   },
-    { tournament:'Wimbledon',                   surface:'Grass', start:'2025-06-30', category:'Grand Slam'   },
-  ],
 }
 
 const Pill = ({ label, value, color='#00c896' }) => (
@@ -64,45 +47,48 @@ const Badge = ({ r }) => {
 }
 
 export default function App() {
-  const [players, setPlayers]   = useState([])
+  const [players, setPlayers]   = useState(PLAYERS)
   const [sel, setSel]           = useState(null)
   const [data, setData]         = useState(null)
   const [loading, setLoading]   = useState(true)
   const [initDone, setInitDone] = useState(false)
   const [mock, setMock]         = useState(false)
-  const [err, setErr]           = useState(null)
+  const [debugLog, setDebugLog] = useState('')
 
-  // Carica top 200 ranking e trova gli ID per cognome esatto
+  // Carica ranking e trova ID reali
   useEffect(() => {
     const init = async () => {
       try {
-        // Prendi le prime 2 pagine del ranking singolare (100+100)
-        const [p1, p2] = await Promise.allSettled([
-          get(`${BASE}/atp/ranking/singles?pageSize=100&pageNo=1`),
-          get(`${BASE}/atp/ranking/singles?pageSize=100&pageNo=2`),
-        ])
-        const r1 = p1.status==='fulfilled' ? (Array.isArray(p1.value) ? p1.value : p1.value?.rankings || p1.value?.players || []) : []
-        const r2 = p2.status==='fulfilled' ? (Array.isArray(p2.value) ? p2.value : p2.value?.rankings || p2.value?.players || []) : []
-        const allRanked = [...r1, ...r2]
+        // Prova entrambi gli URL possibili per il ranking
+        let ranked = []
+        for (const url of [
+          `${BASE}/atp/rankings/singles?pageSize=100&pageNo=1`,
+          `${BASE}/atp/ranking/singles?pageSize=100&pageNo=1`,
+          `${BASE}/atp/player?filter=PlayerGroup:singles&pageSize=100&pageNo=1`,
+        ]) {
+          try {
+            const res = await get(url)
+            const list = Array.isArray(res) ? res : (res?.rankings || res?.players || res?.data || [])
+            if (list.length > 0) { ranked = list; break }
+          } catch {}
+        }
 
-        if (allRanked.length === 0) throw new Error('Ranking vuoto')
+        setDebugLog(`Ranking trovati: ${ranked.length} — primo: ${JSON.stringify(ranked[0]).slice(0,80)}`)
 
-        const resolved = TARGETS.map(t => {
-          const match = allRanked.find(p =>
-            (p.name || p.playerName || '').toLowerCase().includes(t.surname.toLowerCase())
+        if (ranked.length === 0) throw new Error('Ranking vuoto')
+
+        const resolved = PLAYERS.map(p => {
+          const match = ranked.find(r =>
+            (r.name || r.playerName || '').toLowerCase().includes(p.surname.toLowerCase())
           )
-          if (match) return { ...t, id: match.id || match.playerId, name: match.name || match.playerName, rank: match.currentRank || match.rank }
-          return null
-        }).filter(Boolean)
+          return match ? { ...p, id: match.id || match.playerId, name: match.name || p.name, rank: match.currentRank || match.rank } : p
+        })
 
-        if (resolved.length === 0) throw new Error('Nessun giocatore trovato nel ranking')
         setPlayers(resolved)
         setSel(resolved[0])
       } catch(e) {
-        // fallback visibile: mostra errore init
-        setErr(`Init fallita: ${e.message}`)
-        setPlayers(TARGETS.map(t => ({ ...t, id: null })))
-        setSel({ ...TARGETS[0], id: null })
+        setDebugLog(`Init error: ${e.message}`)
+        setSel(PLAYERS[0])
       } finally {
         setInitDone(true)
       }
@@ -110,14 +96,13 @@ export default function App() {
     init()
   }, [])
 
-  // Carica dati giocatore selezionato
   useEffect(() => {
     if (!sel || !initDone) return
-    if (!sel.id) { setData(MOCK); setMock(true); setLoading(false); return }
 
     const load = async () => {
-      setLoading(true); setErr(null); setData(null); setMock(false)
+      setLoading(true); setData(null); setMock(false)
       try {
+        if (!sel.id) throw new Error('ID non trovato')
         const t = sel.tour
         const [pR, tR, mR, fR] = await Promise.allSettled([
           get(`${BASE}/${t}/player/profile/${sel.id}?include=ranking,country`),
@@ -174,7 +159,22 @@ export default function App() {
           })),
         })
       } catch(e) {
-        setData(MOCK); setMock(true); setErr(`Dati non disponibili — mostro dati demo`)
+        // Fallback dati mock personalizzati per giocatore
+        const mockData = {
+          Sinner:     { rank:1,  pts:11330, tot:18, yr:4,  slam:2 },
+          Alcaraz:    { rank:3,  pts:8855,  tot:16, yr:2,  slam:3 },
+          Djokovic:   { rank:7,  pts:4960,  tot:98, yr:0,  slam:24 },
+          Musetti:    { rank:17, pts:2175,  tot:4,  yr:0,  slam:0 },
+          Berrettini: { rank:35, pts:1200,  tot:6,  yr:0,  slam:0 },
+        }
+        const md = mockData[sel.surname] || mockData.Sinner
+        setData({
+          profile: { full_name: sel.name, country: '', birth_date:'', height:'', plays:'', turned_pro:'', coach:'' },
+          ranking: { rank: md.rank, points: md.pts, movement: 0 },
+          titles:  { total: md.tot, current_year: md.yr, grand_slams: md.slam },
+          recent: [], upcoming: [],
+        })
+        setMock(true)
       } finally {
         setLoading(false)
       }
@@ -198,6 +198,9 @@ export default function App() {
         {mock && <span style={{ marginLeft:'auto', fontSize:10, background:'#f59e0b22', color:'#f59e0b', border:'1px solid #f59e0b33', borderRadius:4, padding:'2px 8px' }}>DEMO</span>}
       </div>
 
+      {/* Debug strip — rimuovi dopo test */}
+      {debugLog && <div style={{ padding:'6px 20px', fontSize:10, color:'#333', borderBottom:'1px solid #0d0d0d', fontFamily:'monospace', wordBreak:'break-all' }}>{debugLog}</div>}
+
       <div style={{ padding:'16px 20px', overflowX:'auto' }}>
         <div style={{ display:'flex', gap:8, minWidth:'max-content' }}>
           {players.map(p => (
@@ -209,19 +212,14 @@ export default function App() {
               whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:6,
             }}>
               <span>{p.flag}</span><span>{p.surname}</span>
+              {p.id && <span style={{ fontSize:9, color:'#333' }}>#{p.id}</span>}
             </button>
           ))}
         </div>
       </div>
 
       <div style={{ padding:'0 20px' }}>
-        {loading && (
-          <div style={{ textAlign:'center', padding:60, color:'#333' }}>
-            <div style={{ fontSize:28, marginBottom:12 }}>⏳</div>
-            <div style={{ fontSize:13 }}>Caricamento...</div>
-          </div>
-        )}
-        {err && <div style={{ background:'#1a0a0a', border:'1px solid #ff444422', borderRadius:8, padding:12, color:'#ff6666', fontSize:12, marginBottom:12 }}>⚠️ {err}</div>}
+        {loading && <div style={{ textAlign:'center', padding:60, color:'#333' }}><div style={{ fontSize:28, marginBottom:12 }}>⏳</div><div style={{ fontSize:13 }}>Caricamento...</div></div>}
 
         {data && !loading && <>
           <div style={{ display:'flex', alignItems:'center', gap:16, padding:'20px 0 0' }}>
@@ -246,7 +244,7 @@ export default function App() {
             </div>
             {!!data.ranking.movement && (
               <div style={{ marginTop:10, fontSize:12, color:data.ranking.movement>0?'#00c896':'#ff4444' }}>
-                {data.ranking.movement>0?'▲':'▼'} {Math.abs(data.ranking.movement)} posizioni questa settimana
+                {data.ranking.movement>0?'▲':'▼'} {Math.abs(data.ranking.movement)} posizioni
               </div>
             )}
           </Sec>

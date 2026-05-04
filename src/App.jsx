@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 
 const KEY  = '61137ff3cfmsh3c349b4d3d87940p139f00jsn9c74e5c883b9'
 const HOST = 'tennis-api-atp-wta-itf.p.rapidapi.com'
@@ -19,8 +19,8 @@ const TARGETS = [
   { surname:'Berrettini', name:'Matteo Berrettini', flag:'🇮🇹', tour:'atp' },
 ]
 
-const CY = new Date().getFullYear() // 2026
-const SLAM_RANKS = ['Grand Slam'] // tourRank string per gli Slam
+const CY = new Date().getFullYear()
+const TODAY = new Date()
 
 const fmtDate = (s) => {
   if (!s) return '–'
@@ -28,7 +28,6 @@ const fmtDate = (s) => {
   return isNaN(d) ? s : d.toLocaleDateString('it-IT', { day:'2-digit', month:'2-digit', year:'numeric' })
 }
 
-// ─── UI COMPONENTS ───────────────────────────────────────────────────────────
 const Pill = ({ label, value, color='#00c896' }) => (
   <div style={{ background:'#0a0a0a', border:`1px solid ${color}22`, borderRadius:8, padding:'12px 16px', textAlign:'center', flex:1, minWidth:90 }}>
     <div style={{ color, fontSize:22, fontWeight:700, fontFamily:"'DM Mono',monospace", letterSpacing:-1 }}>{value}</div>
@@ -48,42 +47,38 @@ const Badge = ({ r }) => {
   return <span style={{ display:'inline-block', background:c+'22', color:c, border:`1px solid ${c}44`, borderRadius:4, padding:'1px 7px', fontSize:11, fontWeight:700, fontFamily:"'DM Mono',monospace", minWidth:28, textAlign:'center' }}>{r}</span>
 }
 
-// Grafico ranking sparkline SVG
+// Grafico ranking SVG
 const RankChart = ({ history }) => {
   if (!history || history.length < 2) return null
-  const W = 340, H = 80, PAD = 8
-  const ranks = history.map(h => h.rank)
+  const W=340, H=80, PAD=12
+  const ranks = history.map(h=>h.rank)
   const minR = Math.min(...ranks), maxR = Math.max(...ranks)
   const range = maxR - minR || 1
-  const xs = history.map((_, i) => PAD + (i / (history.length - 1)) * (W - PAD * 2))
-  // Rank inverso: più basso = più in alto nel grafico
-  const ys = ranks.map(r => H - PAD - ((maxR - r) / range) * (H - PAD * 2))
-  const path = xs.map((x, i) => `${i===0?'M':'L'}${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ')
+  const xs = history.map((_,i) => PAD + (i/(history.length-1))*(W-PAD*2))
+  const ys = ranks.map(r => H-PAD - ((maxR-r)/range)*(H-PAD*2))
+  const path = xs.map((x,i)=>`${i===0?'M':'L'}${x.toFixed(1)},${ys[i].toFixed(1)}`).join(' ')
   const area = path + ` L${xs[xs.length-1].toFixed(1)},${H} L${xs[0].toFixed(1)},${H} Z`
-
   return (
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display:'block', marginTop:8 }}>
       <defs>
         <linearGradient id="rg" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#00c896" stopOpacity="0.25"/>
+          <stop offset="0%" stopColor="#00c896" stopOpacity="0.2"/>
           <stop offset="100%" stopColor="#00c896" stopOpacity="0"/>
         </linearGradient>
       </defs>
       <path d={area} fill="url(#rg)"/>
       <path d={path} fill="none" stroke="#00c896" strokeWidth="1.5" strokeLinejoin="round"/>
-      {/* Punti con etichette anno */}
-      {history.map((h, i) => (
+      {history.map((h,i) => (
         <g key={i}>
           <circle cx={xs[i]} cy={ys[i]} r="2.5" fill="#00c896"/>
-          <text x={xs[i]} y={H - 1} textAnchor="middle" fontSize="8" fill="#333">{h.year}</text>
-          <text x={xs[i]} y={ys[i] - 5} textAnchor="middle" fontSize="8" fill="#00c89688">#{h.rank}</text>
+          <text x={xs[i]} y={H-1} textAnchor="middle" fontSize="8" fill="#333">{h.year}</text>
+          <text x={xs[i]} y={ys[i]-5} textAnchor="middle" fontSize="8" fill="#00c89688">#{h.rank}</text>
         </g>
       ))}
     </svg>
   )
 }
 
-// ─── APP ─────────────────────────────────────────────────────────────────────
 export default function App() {
   const [players, setPlayers]   = useState([])
   const [sel, setSel]           = useState(null)
@@ -121,69 +116,113 @@ export default function App() {
         if (!sel.id) throw new Error('ID non trovato')
         const t = sel.tour
 
-        const [pR, titR, perfR, pastR, fixR] = await Promise.allSettled([
+        // Carica tutte le partite dal 2024 (3 pagine = 90 partite)
+        const [pR, titR, perfR, fix1R, past1R, past2R, past3R] = await Promise.allSettled([
           get(`${BASE}/${t}/player/profile/${sel.id}?include=ranking,country`),
           get(`${BASE}/${t}/player/titles/${sel.id}`),
           get(`${BASE}/${t}/player/perf-breakdown/${sel.id}`),
-          // Partite dal 2024 in poi — pageSize grande
-          get(`${BASE}/${t}/player/past-matches/${sel.id}?pageSize=30&filter=PlayerGroup:singles&include=tournament`),
-          get(`${BASE}/${t}/fixtures/player/${sel.id}?include=tournament,round&pageSize=5&filter=PlayerGroup:singles`),
+          // Fixture: prendo solo quelle future
+          get(`${BASE}/${t}/fixtures/player/${sel.id}?include=tournament,round&pageSize=10&filter=PlayerGroup:singles`),
+          get(`${BASE}/${t}/player/past-matches/${sel.id}?pageSize=30&pageNo=1&filter=PlayerGroup:singles&include=tournament`),
+          get(`${BASE}/${t}/player/past-matches/${sel.id}?pageSize=30&pageNo=2&filter=PlayerGroup:singles&include=tournament`),
+          get(`${BASE}/${t}/player/past-matches/${sel.id}?pageSize=30&pageNo=3&filter=PlayerGroup:singles&include=tournament`),
         ])
 
-        const profile  = pR.status==='fulfilled'   ? pR.value   : null
-        const titlesRaw = titR.status==='fulfilled' ? titR.value : []
-        const perf     = perfR.status==='fulfilled' ? perfR.value : null
-        const pastRaw  = pastR.status==='fulfilled' ? pastR.value : []
-        const fixRaw   = fixR.status==='fulfilled'  ? fixR.value  : []
+        const profile   = pR.status==='fulfilled'    ? pR.value    : null
+        const titlesRaw = titR.status==='fulfilled'   ? titR.value  : []
+        const perf      = perfR.status==='fulfilled'  ? perfR.value : null
+        const fixRaw    = fix1R.status==='fulfilled'  ? fix1R.value : []
 
         if (!profile) throw new Error('Profilo non trovato')
 
-        // Titoli: array di {tourRankId, tourRank, titlesWon, titlesLost}
-        // Somma tutti i titlesWon per totale
-        const titArr = Array.isArray(titlesRaw) ? titlesRaw : (titlesRaw?.titles||titlesRaw?.data||[])
-        const titlesTotal = titArr.reduce((s, row) => s + (parseInt(row.titlesWon)||0), 0)
-        // Slam: tourRank contiene "Grand Slam"
-        const titlesSlam  = titArr.filter(row => (row.tourRank||'').toLowerCase().includes('grand slam'))
-                                   .reduce((s, row) => s + (parseInt(row.titlesWon)||0), 0)
-        // Titoli anno corrente: non disponibile direttamente — usiamo past-matches per contare W in finale
-        // (approssimazione: contiamo partite vinte nel turno finale del torneo nell'anno corrente)
+        // Unisci tutte le partite
+        const allPast = [past1R, past2R, past3R]
+          .filter(r => r.status==='fulfilled')
+          .flatMap(r => { const v=r.value; return Array.isArray(v)?v:(v?.matches||v?.data||[]) })
+          .sort((a,b) => new Date(b.date||0) - new Date(a.date||0))
 
-        // Grafico ranking: da perf-breakdown {year: {rank: {top1,top5,...}}}
-        // Struttura: {2015:{court:{},round:{},rank:{top1:{al,0},top5:{al,0}...},level:{}}}
+        // ── TITOLI ──────────────────────────────────────────────────────────
+        const titArr = Array.isArray(titlesRaw) ? titlesRaw : (titlesRaw?.titles||titlesRaw?.data||[])
+        // Solo categorie ATP (escludi Futures/Satellites/ITF)
+        const atpCategories = ['grand slam','masters','atp','tour finals','challenger']
+        const atpTitles = titArr.filter(row => {
+          const rk = (row.tourRank||'').toLowerCase()
+          return !rk.includes('futures') && !rk.includes('satellite') && !rk.includes('itf') && !rk.includes('$10k') && !rk.includes('$15k') && !rk.includes('$25k')
+        })
+        const titlesTotal = atpTitles.reduce((s,row) => s+(parseInt(row.titlesWon)||0), 0)
+        const titlesSlam  = titArr
+          .filter(row => (row.tourRank||'').toLowerCase().includes('grand slam'))
+          .reduce((s,row) => s+(parseInt(row.titlesWon)||0), 0)
+
+        // Titoli anno corrente: conta dal dataset partite
+        // Una vittoria di titolo = il giocatore ha vinto e non ha partite successive nello stesso torneo
+        // Approssimazione: conta quante volte ha vinto la finale (ultimo match di ogni torneo vinto)
+        const matchesCY = allPast.filter(m => m.date && new Date(m.date).getFullYear()===CY)
+        const tournamentWins = new Set()
+        for (const m of matchesCY) {
+          const won = String(m.player1Id)===String(sel.id)
+          if (won) {
+            // Se è la partita più recente di questo torneo ed è una W, probabilmente è finale
+            const tid = m.tournamentId
+            if (!tournamentWins.has(tid)) {
+              // Cerca se ci sono partite successive nello stesso torneo
+              const later = matchesCY.filter(x => x.tournamentId===tid && new Date(x.date) > new Date(m.date))
+              if (later.length===0) tournamentWins.add(tid)
+            }
+          }
+        }
+        const titlesYear = tournamentWins.size
+
+        // ── GRAFICO RANKING ──────────────────────────────────────────────────
         const rankHistory = []
         if (perf) {
           const years = Object.keys(perf).filter(k => /^\d{4}$/.test(k)).sort()
           for (const yr of years) {
-            const yrData = perf[yr]
-            // Cerca end-of-year ranking in vari campi possibili
-            const rankObj = yrData?.rank || {}
-            // top1,top5,top10,top20,top50,top100 sono flags {al:0/1}
-            // Ricaviamo il ranking approssimativo dal livello più alto raggiunto
-            let approxRank = null
-            if (rankObj.top1?.al)   approxRank = 1
-            else if (rankObj.top5?.al)  approxRank = 3
-            else if (rankObj.top10?.al) approxRank = 7
-            else if (rankObj.top20?.al) approxRank = 15
-            else if (rankObj.top50?.al) approxRank = 35
-            else if (rankObj.top100?.al) approxRank = 75
-            if (approxRank) rankHistory.push({ year: yr, rank: approxRank })
+            const rankObj = perf[yr]?.rank || {}
+            // Usa il livello più preciso disponibile
+            let rank = null
+            if (rankObj.top1?.al===1  || rankObj.top1?.al==='1')   rank = 1
+            else if (rankObj.top5?.al===1  || rankObj.top5?.al==='1')   rank = 3
+            else if (rankObj.top10?.al===1 || rankObj.top10?.al==='1')  rank = 8
+            else if (rankObj.top20?.al===1 || rankObj.top20?.al==='1')  rank = 15
+            else if (rankObj.top50?.al===1 || rankObj.top50?.al==='1')  rank = 35
+            else if (rankObj.top100?.al===1|| rankObj.top100?.al==='1') rank = 75
+            if (rank) rankHistory.push({ year:yr, rank })
           }
         }
 
-        // Partite: filtra dal 2024
-        const past = Array.isArray(pastRaw) ? pastRaw : (pastRaw?.matches||pastRaw?.data||[])
-        const recentMatches = past
+        // ── PROSSIMI TORNEI ──────────────────────────────────────────────────
+        const fixArr = Array.isArray(fixRaw) ? fixRaw : (fixRaw?.fixtures||fixRaw?.data||[])
+        // Filtra solo tornei futuri (data > oggi o data null)
+        const upcoming = fixArr
+          .filter(f => !f.date || new Date(f.date) >= TODAY)
+          .reduce((acc, f) => {
+            // Deduplica per torneo (prendi solo la prima occorrenza per torneoId)
+            if (!acc.find(x => x.tournamentId===f.tournamentId)) acc.push(f)
+            return acc
+          }, [])
+          .slice(0, 4)
+          .map(f => ({
+            tournament: f.tournament?.name || `#${f.tournamentId||'?'}`,
+            surface:    f.tournament?.court?.name || '–',
+            start:      f.date || '',
+            category:   f.tournament?.rank?.name || '–',
+          }))
+
+        // ── PARTITE DAL 2024 ─────────────────────────────────────────────────
+        const recent = allPast
           .filter(m => m.date && new Date(m.date).getFullYear() >= 2024)
-          .sort((a,b) => new Date(b.date) - new Date(a.date))
-          .slice(0, 20)
-
-        // Titoli anno corrente: conta W nel dataset partite (round finale = W con nessun avversario successivo)
-        // Approssimazione semplice: usa perf anno corrente
-        const perfCY = perf?.[String(CY)] || perf?.[String(CY-1)] || {}
-        const titlesYear = (perfCY?.level?.mainTour?.titlesWon) ?? (Object.values(perfCY?.level||{}).reduce((s,v)=>s+(v?.titlesWon||0),0) || 0)
-
-        // Prossimi tornei
-        const fixtures = Array.isArray(fixRaw) ? fixRaw : (fixRaw?.fixtures||fixRaw?.data||[])
+          .map(m => {
+            const won = String(m.player1Id)===String(sel.id)
+            return {
+              tournament: m.tournament?.name || `#${m.tournamentId||'?'}`,
+              result:     won?'W':'L',
+              opponent:   won?(m.player2?.name||'–'):(m.player1?.name||'–'),
+              score:      m.result||'–',
+              date:       m.date||'',
+              year:       new Date(m.date).getFullYear(),
+            }
+          })
 
         setData({
           profile: {
@@ -197,32 +236,11 @@ export default function App() {
           },
           ranking: {
             rank:     profile.currentRank ?? sel.rank ?? '–',
-            points:   profile.curRank?.points ?? profile.ranking?.points ?? sel.points ?? '–',
+            points:   (profile.curRank?.points ?? profile.ranking?.points ?? sel.points) ?? '–',
             movement: profile.progress ?? 0,
           },
-          titles: {
-            total:        titlesTotal || '–',
-            current_year: titlesYear || 0,
-            grand_slams:  titlesSlam || '–',
-          },
-          rankHistory,
-          recent: recentMatches.map(m => {
-            const won = String(m.player1Id)===String(sel.id)
-            return {
-              tournament: m.tournament?.name || `#${m.tournamentId||'?'}`,
-              result:     won?'W':'L',
-              opponent:   won?(m.player2?.name||'–'):(m.player1?.name||'–'),
-              score:      m.result||'–',
-              date:       m.date||'',
-              year:       m.date ? new Date(m.date).getFullYear() : null,
-            }
-          }),
-          upcoming: fixtures.slice(0,4).map(f => ({
-            tournament: f.tournament?.name || `#${f.tournamentId||'?'}`,
-            surface:    f.tournament?.court?.name || '–',
-            start:      f.date||'',
-            category:   f.tournament?.rank?.name || '–',
-          })),
+          titles: { total:titlesTotal||'–', current_year:titlesYear, grand_slams:titlesSlam||'–' },
+          rankHistory, recent, upcoming,
         })
       } catch {
         setMock(true)
@@ -250,13 +268,11 @@ export default function App() {
     </div>
   )
 
-  // Raggruppa partite per anno
   const matchesByYear = {}
   if (data?.recent) {
     for (const m of data.recent) {
-      const y = m.year || '?'
-      if (!matchesByYear[y]) matchesByYear[y] = []
-      matchesByYear[y].push(m)
+      if (!matchesByYear[m.year]) matchesByYear[m.year] = []
+      matchesByYear[m.year].push(m)
     }
   }
 
@@ -264,14 +280,12 @@ export default function App() {
     <div style={{fontFamily:"'DM Sans',-apple-system,sans-serif",background:'#050505',color:'#e8e8e8',minHeight:'100vh',padding:'0 0 40px'}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');*{box-sizing:border-box;margin:0;padding:0}.pb{transition:all .15s}.pb:hover{border-color:#00c89644!important;background:#0d1f1a!important}.mr:hover{background:#0d0d0d!important}`}</style>
 
-      {/* Header */}
       <div style={{borderBottom:'1px solid #111',padding:'16px 20px',display:'flex',alignItems:'center',gap:10}}>
         <span style={{fontSize:18}}>🎾</span>
         <span style={{fontSize:13,color:'#444',letterSpacing:1,textTransform:'uppercase'}}>Tennis Player Stats</span>
         {mock && <span style={{marginLeft:'auto',fontSize:10,background:'#f59e0b22',color:'#f59e0b',border:'1px solid #f59e0b33',borderRadius:4,padding:'2px 8px'}}>DEMO</span>}
       </div>
 
-      {/* Player selector */}
       <div style={{padding:'16px 20px',overflowX:'auto'}}>
         <div style={{display:'flex',gap:8,minWidth:'max-content'}}>
           {players.map(p=>(
@@ -292,7 +306,6 @@ export default function App() {
         {loading && <div style={{textAlign:'center',padding:60,color:'#333'}}><div style={{fontSize:28,marginBottom:12}}>⏳</div><div style={{fontSize:13}}>Caricamento...</div></div>}
 
         {data && !loading && <>
-          {/* Player header */}
           <div style={{display:'flex',alignItems:'center',gap:16,padding:'20px 0 0'}}>
             <div style={{width:56,height:56,borderRadius:'50%',background:'#0d1f1a',border:'2px solid #00c89633',display:'flex',alignItems:'center',justifyContent:'center',fontSize:28,flexShrink:0}}>{sel.flag}</div>
             <div>
@@ -305,12 +318,11 @@ export default function App() {
             </div>
           </div>
 
-          {/* Pills */}
           <Sec title="Classifica & statistiche">
             <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
               <Pill label="Ranking ATP" value={`#${data.ranking.rank}`}/>
               <Pill label="Punti" value={typeof data.ranking.points==='number'?data.ranking.points.toLocaleString('it-IT'):data.ranking.points}/>
-              <Pill label="Titoli totali" value={data.titles.total} color="#f59e0b"/>
+              <Pill label="Titoli ATP" value={data.titles.total} color="#f59e0b"/>
               <Pill label={`Titoli ${CY}`} value={data.titles.current_year} color="#f59e0b"/>
               <Pill label="Slam" value={data.titles.grand_slams} color="#f59e0b"/>
             </div>
@@ -321,15 +333,13 @@ export default function App() {
             )}
           </Sec>
 
-          {/* Grafico ranking */}
           {data.rankHistory?.length > 1 && (
             <Sec title="Andamento ranking (per anno)">
               <RankChart history={data.rankHistory}/>
-              <div style={{fontSize:10,color:'#333',marginTop:4}}>* Basato su ranking di fine anno</div>
+              <div style={{fontSize:10,color:'#333',marginTop:4}}>* Approssimativo — basato su fasce di ranking</div>
             </Sec>
           )}
 
-          {/* Prossimi tornei */}
           {data.upcoming?.length > 0 && (
             <Sec title="Prossimi tornei">
               {data.upcoming.map((t,i)=>(
@@ -344,7 +354,6 @@ export default function App() {
             </Sec>
           )}
 
-          {/* Risultati dal 2024 raggruppati per anno */}
           {Object.keys(matchesByYear).sort((a,b)=>b-a).map(yr=>(
             <Sec key={yr} title={`Risultati ${yr}`}>
               {matchesByYear[yr].map((m,i)=>(
@@ -359,7 +368,6 @@ export default function App() {
             </Sec>
           ))}
 
-          {/* Profilo */}
           {(data.profile.plays||data.profile.turned_pro||data.profile.coach) && (
             <Sec title="Profilo">
               {[['Gioco',data.profile.plays],['Pro dal',data.profile.turned_pro],['Coach',data.profile.coach]]

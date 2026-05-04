@@ -66,8 +66,9 @@ export default function App() {
         // URL confermato dal debug: /rankings/singles (con la s) dà 404,
         // ma il ranking trovato aveva 101 elementi — l'URL che ha funzionato
         // è /atp/player con filtro singles, vediamo la struttura reale
-        const res = await get(`${BASE}/atp/rankings/singles?pageSize=100&pageNo=1`)
-        const list = Array.isArray(res) ? res : (res?.rankings || res?.players || res?.data || [])
+        const res = await get(`${BASE}/atp/ranking/singles?pageSize=100&pageNo=1`)
+        const raw = Array.isArray(res) ? res : (res?.rankings || res?.players || res?.data || [])
+        const list = raw.map(row => row.player ? { id: row.player.id, name: row.player.name, rank: row.position } : { id: row.id, name: row.name || row.playerName, rank: row.position || row.currentRank })
 
         const resolved = TARGETS.map(t => {
           const match = list.find(row => {

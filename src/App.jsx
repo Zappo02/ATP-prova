@@ -6,18 +6,18 @@ const BASE = 'https://tennis-api-atp-wta-itf.p.rapidapi.com/tennis/v2'
 
 const get = async (url) => {
   const r = await fetch(url, { headers: { 'X-RapidAPI-Key': KEY, 'X-RapidAPI-Host': HOST } })
-  if (!r.ok) throw new Error(`${r.status} ${url}`)
+  if (!r.ok) throw new Error(`${r.status}`)
   const j = await r.json()
   return j?.data ?? j
 }
 
-// Giocatori con ID da trovare tramite getPlayers con filtro nome
+// Cognomi da cercare nel ranking top 200
 const TARGETS = [
-  { search: 'Sinner Jannik',     name: 'Jannik Sinner',     flag: '🇮🇹', tour: 'atp' },
-  { search: 'Alcaraz Carlos',    name: 'Carlos Alcaraz',    flag: '🇪🇸', tour: 'atp' },
-  { search: 'Djokovic Novak',    name: 'Novak Djokovic',    flag: '🇷🇸', tour: 'atp' },
-  { search: 'Musetti Lorenzo',   name: 'Lorenzo Musetti',   flag: '🇮🇹', tour: 'atp' },
-  { search: 'Berrettini Matteo', name: 'Matteo Berrettini', flag: '🇮🇹', tour: 'atp' },
+  { surname: 'Sinner',     name: 'Jannik Sinner',     flag: '🇮🇹', tour: 'atp' },
+  { surname: 'Alcaraz',    name: 'Carlos Alcaraz',    flag: '🇪🇸', tour: 'atp' },
+  { surname: 'Djokovic',   name: 'Novak Djokovic',    flag: '🇷🇸', tour: 'atp' },
+  { surname: 'Musetti',    name: 'Lorenzo Musetti',   flag: '🇮🇹', tour: 'atp' },
+  { surname: 'Berrettini', name: 'Matteo Berrettini', flag: '🇮🇹', tour: 'atp' },
 ]
 
 const fmtDate = (s) => {
@@ -44,30 +44,6 @@ const MOCK = {
   ],
 }
 
-// Cerca ID reale scorrendo le pagine di getPlayers filtrate per paese
-const findPlayerId = async (target) => {
-  // Mappa cognome → filtro paese
-  const countryMap = { 'Sinner':'ITA', 'Alcaraz':'ESP', 'Djokovic':'SRB', 'Musetti':'ITA', 'Berrettini':'ITA' }
-  const surname = target.search.split(' ')[0]
-  const country = countryMap[surname] || 'ITA'
-  
-  for (let page = 1; page <= 5; page++) {
-    try {
-      const data = await get(`${BASE}/atp/player?filter=PlayerGroup:singles;PlayerCountry:${country}&pageSize=50&pageNo=${page}`)
-      const list = Array.isArray(data) ? data : (data?.players || [])
-      if (!list.length) break
-      
-      const match = list.find(p => {
-        const n = (p.name || '').toLowerCase()
-        const parts = target.search.toLowerCase().split(' ')
-        return parts.every(part => n.includes(part))
-      })
-      if (match) return match
-    } catch { break }
-  }
-  return null
-}
-
 const Pill = ({ label, value, color='#00c896' }) => (
   <div style={{ background:'#0a0a0a', border:`1px solid ${color}22`, borderRadius:8, padding:'12px 16px', textAlign:'center', flex:1, minWidth:90 }}>
     <div style={{ color, fontSize:22, fontWeight:700, fontFamily:"'DM Mono',monospace", letterSpacing:-1 }}>{value}</div>
@@ -88,29 +64,48 @@ const Badge = ({ r }) => {
 }
 
 export default function App() {
-  const [players, setPlayers] = useState([])
-  const [sel, setSel]         = useState(null)
-  const [data, setData]       = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [players, setPlayers]   = useState([])
+  const [sel, setSel]           = useState(null)
+  const [data, setData]         = useState(null)
+  const [loading, setLoading]   = useState(true)
   const [initDone, setInitDone] = useState(false)
-  const [mock, setMock]       = useState(false)
-  const [err, setErr]         = useState(null)
+  const [mock, setMock]         = useState(false)
+  const [err, setErr]           = useState(null)
 
-  // Risolvi ID reali all'avvio
+  // Carica top 200 ranking e trova gli ID per cognome esatto
   useEffect(() => {
     const init = async () => {
-      const resolved = await Promise.all(
-        TARGETS.map(async (t) => {
-          const match = await findPlayerId(t)
-          if (match) return { ...t, id: match.id, name: match.name }
+      try {
+        // Prendi le prime 2 pagine del ranking singolare (100+100)
+        const [p1, p2] = await Promise.allSettled([
+          get(`${BASE}/atp/ranking/singles?pageSize=100&pageNo=1`),
+          get(`${BASE}/atp/ranking/singles?pageSize=100&pageNo=2`),
+        ])
+        const r1 = p1.status==='fulfilled' ? (Array.isArray(p1.value) ? p1.value : p1.value?.rankings || p1.value?.players || []) : []
+        const r2 = p2.status==='fulfilled' ? (Array.isArray(p2.value) ? p2.value : p2.value?.rankings || p2.value?.players || []) : []
+        const allRanked = [...r1, ...r2]
+
+        if (allRanked.length === 0) throw new Error('Ranking vuoto')
+
+        const resolved = TARGETS.map(t => {
+          const match = allRanked.find(p =>
+            (p.name || p.playerName || '').toLowerCase().includes(t.surname.toLowerCase())
+          )
+          if (match) return { ...t, id: match.id || match.playerId, name: match.name || match.playerName, rank: match.currentRank || match.rank }
           return null
-        })
-      )
-      const valid = resolved.filter(Boolean)
-      const list = valid.length > 0 ? valid : TARGETS.map((t,i) => ({ ...t, id: [999,999,999,999,999][i] }))
-      setPlayers(list)
-      setSel(list[0])
-      setInitDone(true)
+        }).filter(Boolean)
+
+        if (resolved.length === 0) throw new Error('Nessun giocatore trovato nel ranking')
+        setPlayers(resolved)
+        setSel(resolved[0])
+      } catch(e) {
+        // fallback visibile: mostra errore init
+        setErr(`Init fallita: ${e.message}`)
+        setPlayers(TARGETS.map(t => ({ ...t, id: null })))
+        setSel({ ...TARGETS[0], id: null })
+      } finally {
+        setInitDone(true)
+      }
     }
     init()
   }, [])
@@ -118,6 +113,8 @@ export default function App() {
   // Carica dati giocatore selezionato
   useEffect(() => {
     if (!sel || !initDone) return
+    if (!sel.id) { setData(MOCK); setMock(true); setLoading(false); return }
+
     const load = async () => {
       setLoading(true); setErr(null); setData(null); setMock(false)
       try {
@@ -130,9 +127,9 @@ export default function App() {
         ])
 
         const profile  = pR.status==='fulfilled' ? pR.value : null
-        const titles   = tR.status==='fulfilled' ? (Array.isArray(tR.value) ? tR.value : tR.value?.data||[]) : []
-        const past     = mR.status==='fulfilled' ? (Array.isArray(mR.value) ? mR.value : mR.value?.data||[]) : []
-        const fixtures = fR.status==='fulfilled' ? (Array.isArray(fR.value) ? fR.value : fR.value?.data||[]) : []
+        const titles   = tR.status==='fulfilled' ? (Array.isArray(tR.value)?tR.value:tR.value?.data||[]) : []
+        const past     = mR.status==='fulfilled' ? (Array.isArray(mR.value)?mR.value:mR.value?.data||[]) : []
+        const fixtures = fR.status==='fulfilled' ? (Array.isArray(fR.value)?fR.value:fR.value?.data||[]) : []
 
         if (!profile) throw new Error('Profilo non trovato')
 
@@ -150,14 +147,14 @@ export default function App() {
             coach:      profile.coach || '',
           },
           ranking: {
-            rank:     profile.currentRank ?? '–',
+            rank:     profile.currentRank ?? sel.rank ?? '–',
             points:   profile.points ?? '–',
             movement: profile.progress ?? 0,
           },
           titles: {
             total:        titles.length || '–',
-            current_year: titles.filter(t => { const y=t.year||(t.date?new Date(t.date).getFullYear():0); return y===yr }).length,
-            grand_slams:  titles.filter(t => slams.some(s => (t.tournament?.name||t.name||'').includes(s))).length,
+            current_year: titles.filter(tl => { const y=tl.year||(tl.date?new Date(tl.date).getFullYear():0); return y===yr }).length,
+            grand_slams:  titles.filter(tl => slams.some(s => (tl.tournament?.name||tl.name||'').includes(s))).length,
           },
           recent: past.slice(0,5).map(m => {
             const won = String(m.player1Id)===String(sel.id)
@@ -177,7 +174,7 @@ export default function App() {
           })),
         })
       } catch(e) {
-        setData(MOCK); setMock(true); setErr(`Dati non disponibili per questo giocatore — mostro dati demo Sinner`)
+        setData(MOCK); setMock(true); setErr(`Dati non disponibili — mostro dati demo`)
       } finally {
         setLoading(false)
       }
@@ -187,7 +184,7 @@ export default function App() {
 
   if (!initDone) return (
     <div style={{ background:'#050505', color:'#444', minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', fontFamily:'monospace', fontSize:13 }}>
-      🎾 Inizializzazione giocatori...
+      🎾 Caricamento ranking...
     </div>
   )
 
@@ -204,14 +201,14 @@ export default function App() {
       <div style={{ padding:'16px 20px', overflowX:'auto' }}>
         <div style={{ display:'flex', gap:8, minWidth:'max-content' }}>
           {players.map(p => (
-            <button key={p.id} className="pb" onClick={() => setSel(p)} style={{
-              background: sel?.id===p.id ? '#0d1f1a' : 'transparent',
-              border: `1px solid ${sel?.id===p.id ? '#00c896' : '#1a1a1a'}`,
-              color: sel?.id===p.id ? '#00c896' : '#666',
+            <button key={p.surname} className="pb" onClick={() => setSel(p)} style={{
+              background: sel?.surname===p.surname ? '#0d1f1a' : 'transparent',
+              border: `1px solid ${sel?.surname===p.surname ? '#00c896' : '#1a1a1a'}`,
+              color: sel?.surname===p.surname ? '#00c896' : '#666',
               borderRadius:8, padding:'6px 14px', cursor:'pointer', fontSize:13,
               whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:6,
             }}>
-              <span>{p.flag}</span><span>{p.name.split(' ').pop()}</span>
+              <span>{p.flag}</span><span>{p.surname}</span>
             </button>
           ))}
         </div>

@@ -42,21 +42,6 @@ const Badge = ({ r }) => {
   return <span style={{ display:'inline-block', background:c+'22', color:c, border:`1px solid ${c}44`, borderRadius:4, padding:'1px 7px', fontSize:11, fontWeight:700, fontFamily:"'DM Mono',monospace", minWidth:28, textAlign:'center' }}>{r}</span>
 }
 
-// Ricava il nome del torneo da una partita (struttura variabile)
-const getTournamentName = (m) =>
-  m.tournament?.name || m.tournamentName || m.tour?.name ||
-  (m.tournamentId ? `Torneo #${m.tournamentId}` : '–')
-
-// Ricava il nome del torneo da una fixture
-const getFixtureTournament = (f) =>
-  f.tournament?.name || f.tournamentName || (f.tournamentId ? `Torneo #${f.tournamentId}` : '–')
-
-const getFixtureSurface = (f) =>
-  f.tournament?.court?.name || f.court?.name || f.surface || '–'
-
-const getFixtureCategory = (f) =>
-  f.tournament?.rank?.name || f.tournament?.category || f.category || '–'
-
 export default function App() {
   const [players, setPlayers]   = useState([])
   const [sel, setSel]           = useState(null)
@@ -64,8 +49,6 @@ export default function App() {
   const [loading, setLoading]   = useState(true)
   const [initDone, setInitDone] = useState(false)
   const [mock, setMock]         = useState(false)
-  // Debug: mostra struttura raw prima partita e primo titolo
-  const [dbg, setDbg]           = useState('')
 
   useEffect(() => {
     const init = async () => {
@@ -93,41 +76,44 @@ export default function App() {
   useEffect(() => {
     if (!sel || !initDone) return
     const load = async () => {
-      setLoading(true); setData(null); setMock(false); setDbg('')
+      setLoading(true); setData(null); setMock(false)
       try {
         if (!sel.id) throw new Error('ID non trovato')
         const t = sel.tour
 
         const [pR, tR, mR, fR] = await Promise.allSettled([
           get(`${BASE}/${t}/player/profile/${sel.id}?include=ranking,country`),
-          get(`${BASE}/${t}/player/titles/${sel.id}`),
-          get(`${BASE}/${t}/player/past-matches/${sel.id}?pageSize=5&filter=PlayerGroup:singles`),
+          get(`${BASE}/${t}/player/match-stats/${sel.id}`),
+          // include=tournament per avere il nome torneo nelle partite
+          get(`${BASE}/${t}/player/past-matches/${sel.id}?pageSize=5&filter=PlayerGroup:singles&include=tournament`),
           get(`${BASE}/${t}/fixtures/player/${sel.id}?include=tournament,round&pageSize=3&filter=PlayerGroup:singles`),
         ])
 
         const profile  = pR.status==='fulfilled' ? pR.value : null
-        const titlesRaw = tR.status==='fulfilled' ? tR.value : []
-        const pastRaw   = mR.status==='fulfilled' ? mR.value : []
-        const fixRaw    = fR.status==='fulfilled' ? fR.value : []
+        const stats    = tR.status==='fulfilled' ? tR.value : null
+        const pastRaw  = mR.status==='fulfilled' ? mR.value : []
+        const fixRaw   = fR.status==='fulfilled' ? fR.value : []
 
-        // Normalizza array
-        const titles   = Array.isArray(titlesRaw) ? titlesRaw : (titlesRaw?.titles || titlesRaw?.data || [])
-        const past     = Array.isArray(pastRaw)   ? pastRaw   : (pastRaw?.matches || pastRaw?.data || [])
-        const fixtures = Array.isArray(fixRaw)    ? fixRaw    : (fixRaw?.fixtures || fixRaw?.data || [])
+        const past     = Array.isArray(pastRaw) ? pastRaw : (pastRaw?.matches || pastRaw?.data || [])
+        const fixtures = Array.isArray(fixRaw)  ? fixRaw  : (fixRaw?.fixtures || fixRaw?.data  || [])
 
         if (!profile) throw new Error('Profilo non trovato')
 
-        // Debug: struttura raw
-        if (past[0])   setDbg(d => d + 'MATCH: ' + JSON.stringify(past[0]).slice(0,120) + '\n')
-        if (titles[0]) setDbg(d => d + 'TITLE: ' + JSON.stringify(titles[0]).slice(0,120) + '\n')
-        if (fixtures[0]) setDbg(d => d + 'FIX: ' + JSON.stringify(fixtures[0]).slice(0,120) + '\n')
+        // Titoli da match-stats: titlesWon è il totale
+        const titlesTotal = stats?.titlesWon ?? stats?.titles ?? '–'
+        // Slam: da match-stats cerchiamo campo dedicato o contiamo dalle finals
+        const grandSlams = stats?.grandSlamTitles ?? stats?.slamTitles ?? '–'
+        // Titoli anno corrente: non disponibili direttamente, usiamo 0 finché non troviamo il campo
+        const titlesYear = stats?.titlesThisYear ?? stats?.currentYearTitles ?? 0
 
-        const yr    = new Date().getFullYear()
-        const slams = ['Australian Open','Roland Garros','Wimbledon','US Open']
+        // Nome torneo: ora con include=tournament dovrebbe esserci
+        const getTName = (m) =>
+          m.tournament?.name || m.tournamentName ||
+          (m.tournamentId ? `#${m.tournamentId}` : '–')
 
-        // Titoli: conta per anno e Slam cercando in tutti i campi possibili
-        const getTitleYear = (tl) => tl.year || tl.season || (tl.date ? new Date(tl.date).getFullYear() : 0) || (tl.tournament?.date ? new Date(tl.tournament.date).getFullYear() : 0)
-        const getTitleName = (tl) => tl.tournament?.name || tl.tournamentName || tl.name || ''
+        const getFName = (f) =>
+          f.tournament?.name || f.tournamentName ||
+          (f.tournamentId ? `#${f.tournamentId}` : '–')
 
         setData({
           profile: {
@@ -141,19 +127,18 @@ export default function App() {
           },
           ranking: {
             rank:     profile.currentRank ?? sel.rank ?? '–',
-            // punti: dall'oggetto ranking annidato nel profilo, o dal ranking
             points:   profile.curRank?.points ?? profile.ranking?.points ?? sel.points ?? '–',
             movement: profile.progress ?? profile.curRank?.movement ?? 0,
           },
           titles: {
-            total:        titles.length || '–',
-            current_year: titles.filter(tl => getTitleYear(tl) === yr).length,
-            grand_slams:  titles.filter(tl => slams.some(s => getTitleName(tl).includes(s))).length,
+            total:        titlesTotal,
+            current_year: titlesYear,
+            grand_slams:  grandSlams,
           },
           recent: past.slice(0,5).map(m => {
             const won = String(m.player1Id)===String(sel.id)
             return {
-              tournament: getTournamentName(m),
+              tournament: getTName(m),
               result:     won?'W':'L',
               opponent:   won?(m.player2?.name||'–'):(m.player1?.name||'–'),
               score:      m.result||'–',
@@ -161,10 +146,10 @@ export default function App() {
             }
           }),
           upcoming: fixtures.slice(0,3).map(f => ({
-            tournament: getFixtureTournament(f),
-            surface:    getFixtureSurface(f),
+            tournament: getFName(f),
+            surface:    f.tournament?.court?.name || f.court?.name || '–',
             start:      f.date||'',
-            category:   getFixtureCategory(f),
+            category:   f.tournament?.rank?.name || f.tournament?.category || '–',
           })),
         })
       } catch {
@@ -218,9 +203,6 @@ export default function App() {
           ))}
         </div>
       </div>
-
-      {/* Debug strip — mostra struttura raw */}
-      {dbg && <pre style={{ padding:'6px 20px', fontSize:9, color:'#2a2a2a', fontFamily:'monospace', whiteSpace:'pre-wrap', wordBreak:'break-all', borderBottom:'1px solid #0d0d0d' }}>{dbg}</pre>}
 
       <div style={{ padding:'0 20px' }}>
         {loading && <div style={{ textAlign:'center', padding:60, color:'#333' }}><div style={{ fontSize:28, marginBottom:12 }}>⏳</div><div style={{ fontSize:13 }}>Caricamento...</div></div>}

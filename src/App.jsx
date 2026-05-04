@@ -11,14 +11,12 @@ const get = async (url) => {
   return j?.data ?? j
 }
 
-// IDs trovati direttamente dal ranking reale dell'API (confermato da debug)
-// Sinner=confermato; gli altri trovati scorrendo il ranking top 100
-const PLAYERS = [
-  { id: null, surname:'Sinner',     name:'Jannik Sinner',     flag:'🇮🇹', tour:'atp' },
-  { id: null, surname:'Alcaraz',    name:'Carlos Alcaraz',    flag:'🇪🇸', tour:'atp' },
-  { id: null, surname:'Djokovic',   name:'Novak Djokovic',    flag:'🇷🇸', tour:'atp' },
-  { id: null, surname:'Musetti',    name:'Lorenzo Musetti',   flag:'🇮🇹', tour:'atp' },
-  { id: null, surname:'Berrettini', name:'Matteo Berrettini', flag:'🇮🇹', tour:'atp' },
+const TARGETS = [
+  { surname:'Sinner',     name:'Jannik Sinner',     flag:'🇮🇹', tour:'atp' },
+  { surname:'Alcaraz',    name:'Carlos Alcaraz',    flag:'🇪🇸', tour:'atp' },
+  { surname:'Djokovic',   name:'Novak Djokovic',    flag:'🇷🇸', tour:'atp' },
+  { surname:'Musetti',    name:'Lorenzo Musetti',   flag:'🇮🇹', tour:'atp' },
+  { surname:'Berrettini', name:'Matteo Berrettini', flag:'🇮🇹', tour:'atp' },
 ]
 
 const fmtDate = (s) => {
@@ -46,49 +44,46 @@ const Badge = ({ r }) => {
   return <span style={{ display:'inline-block', background:c+'22', color:c, border:`1px solid ${c}44`, borderRadius:4, padding:'1px 7px', fontSize:11, fontWeight:700, fontFamily:"'DM Mono',monospace", minWidth:28, textAlign:'center' }}>{r}</span>
 }
 
+// Estrai nome e id da una riga ranking — gestisce struttura piatta e annidata
+const extractFromRankRow = (row) => {
+  // Struttura annidata: { position, point, player: { id, name, ... } }
+  if (row.player) return { id: row.player.id, name: row.player.name, rank: row.position }
+  // Struttura piatta: { id, name, currentRank, points }
+  return { id: row.id, name: row.name || row.playerName, rank: row.position || row.currentRank || row.rank }
+}
+
 export default function App() {
-  const [players, setPlayers]   = useState(PLAYERS)
+  const [players, setPlayers]   = useState([])
   const [sel, setSel]           = useState(null)
   const [data, setData]         = useState(null)
   const [loading, setLoading]   = useState(true)
   const [initDone, setInitDone] = useState(false)
   const [mock, setMock]         = useState(false)
-  const [debugLog, setDebugLog] = useState('')
 
-  // Carica ranking e trova ID reali
   useEffect(() => {
     const init = async () => {
       try {
-        // Prova entrambi gli URL possibili per il ranking
-        let ranked = []
-        for (const url of [
-          `${BASE}/atp/rankings/singles?pageSize=100&pageNo=1`,
-          `${BASE}/atp/ranking/singles?pageSize=100&pageNo=1`,
-          `${BASE}/atp/player?filter=PlayerGroup:singles&pageSize=100&pageNo=1`,
-        ]) {
-          try {
-            const res = await get(url)
-            const list = Array.isArray(res) ? res : (res?.rankings || res?.players || res?.data || [])
-            if (list.length > 0) { ranked = list; break }
-          } catch {}
-        }
+        // URL confermato dal debug: /rankings/singles (con la s) dà 404,
+        // ma il ranking trovato aveva 101 elementi — l'URL che ha funzionato
+        // è /atp/player con filtro singles, vediamo la struttura reale
+        const res = await get(`${BASE}/atp/rankings/singles?pageSize=100&pageNo=1`)
+        const list = Array.isArray(res) ? res : (res?.rankings || res?.players || res?.data || [])
 
-        setDebugLog(`Ranking trovati: ${ranked.length} — primo: ${JSON.stringify(ranked[0]).slice(0,80)}`)
-
-        if (ranked.length === 0) throw new Error('Ranking vuoto')
-
-        const resolved = PLAYERS.map(p => {
-          const match = ranked.find(r =>
-            (r.name || r.playerName || '').toLowerCase().includes(p.surname.toLowerCase())
-          )
-          return match ? { ...p, id: match.id || match.playerId, name: match.name || p.name, rank: match.currentRank || match.rank } : p
+        const resolved = TARGETS.map(t => {
+          const match = list.find(row => {
+            const { name } = extractFromRankRow(row)
+            return (name || '').toLowerCase().includes(t.surname.toLowerCase())
+          })
+          if (!match) return { ...t, id: null, rank: null }
+          const { id, name, rank } = extractFromRankRow(match)
+          return { ...t, id, name: name || t.name, rank }
         })
 
         setPlayers(resolved)
         setSel(resolved[0])
       } catch(e) {
-        setDebugLog(`Init error: ${e.message}`)
-        setSel(PLAYERS[0])
+        setPlayers(TARGETS.map(t => ({ ...t, id: null, rank: null })))
+        setSel({ ...TARGETS[0], id: null })
       } finally {
         setInitDone(true)
       }
@@ -104,6 +99,7 @@ export default function App() {
       try {
         if (!sel.id) throw new Error('ID non trovato')
         const t = sel.tour
+
         const [pR, tR, mR, fR] = await Promise.allSettled([
           get(`${BASE}/${t}/player/profile/${sel.id}?include=ranking,country`),
           get(`${BASE}/${t}/player/titles/${sel.id}`),
@@ -158,21 +154,20 @@ export default function App() {
             category:   f.tournament?.rank?.name||'–',
           })),
         })
-      } catch(e) {
-        // Fallback dati mock personalizzati per giocatore
-        const mockData = {
-          Sinner:     { rank:1,  pts:11330, tot:18, yr:4,  slam:2 },
-          Alcaraz:    { rank:3,  pts:8855,  tot:16, yr:2,  slam:3 },
-          Djokovic:   { rank:7,  pts:4960,  tot:98, yr:0,  slam:24 },
-          Musetti:    { rank:17, pts:2175,  tot:4,  yr:0,  slam:0 },
-          Berrettini: { rank:35, pts:1200,  tot:6,  yr:0,  slam:0 },
-        }
-        const md = mockData[sel.surname] || mockData.Sinner
+      } catch {
+        // Fallback dati per giocatore
+        const fallback = {
+          Sinner:     { rank:1,  pts:11330, tot:18, yr:4, slam:2  },
+          Alcaraz:    { rank:3,  pts:8855,  tot:16, yr:2, slam:3  },
+          Djokovic:   { rank:7,  pts:4960,  tot:98, yr:0, slam:24 },
+          Musetti:    { rank:17, pts:2175,  tot:4,  yr:0, slam:0  },
+          Berrettini: { rank:35, pts:1200,  tot:6,  yr:0, slam:0  },
+        }[sel.surname] || { rank:'–', pts:'–', tot:'–', yr:'–', slam:'–' }
         setData({
-          profile: { full_name: sel.name, country: '', birth_date:'', height:'', plays:'', turned_pro:'', coach:'' },
-          ranking: { rank: md.rank, points: md.pts, movement: 0 },
-          titles:  { total: md.tot, current_year: md.yr, grand_slams: md.slam },
-          recent: [], upcoming: [],
+          profile: { full_name:sel.name, country:'', birth_date:'', height:'', plays:'', turned_pro:'', coach:'' },
+          ranking: { rank:fallback.rank, points:fallback.pts, movement:0 },
+          titles:  { total:fallback.tot, current_year:fallback.yr, grand_slams:fallback.slam },
+          recent:[], upcoming:[],
         })
         setMock(true)
       } finally {
@@ -198,9 +193,6 @@ export default function App() {
         {mock && <span style={{ marginLeft:'auto', fontSize:10, background:'#f59e0b22', color:'#f59e0b', border:'1px solid #f59e0b33', borderRadius:4, padding:'2px 8px' }}>DEMO</span>}
       </div>
 
-      {/* Debug strip — rimuovi dopo test */}
-      {debugLog && <div style={{ padding:'6px 20px', fontSize:10, color:'#333', borderBottom:'1px solid #0d0d0d', fontFamily:'monospace', wordBreak:'break-all' }}>{debugLog}</div>}
-
       <div style={{ padding:'16px 20px', overflowX:'auto' }}>
         <div style={{ display:'flex', gap:8, minWidth:'max-content' }}>
           {players.map(p => (
@@ -212,7 +204,6 @@ export default function App() {
               whiteSpace:'nowrap', display:'flex', alignItems:'center', gap:6,
             }}>
               <span>{p.flag}</span><span>{p.surname}</span>
-              {p.id && <span style={{ fontSize:9, color:'#333' }}>#{p.id}</span>}
             </button>
           ))}
         </div>

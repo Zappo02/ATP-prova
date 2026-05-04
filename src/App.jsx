@@ -31,26 +31,31 @@ const Pill = ({ label, value, color='#00c896' }) => (
     <div style={{ color:'#666', fontSize:11, marginTop:3, textTransform:'uppercase', letterSpacing:1 }}>{label}</div>
   </div>
 )
-
 const Sec = ({ title, children }) => (
   <div style={{ marginTop:24 }}>
     <div style={{ fontSize:11, color:'#444', textTransform:'uppercase', letterSpacing:2, marginBottom:12, paddingBottom:8, borderBottom:'1px solid #1a1a1a' }}>{title}</div>
     {children}
   </div>
 )
-
 const Badge = ({ r }) => {
   const c = { W:'#00c896', L:'#ff4444', F:'#f59e0b', SF:'#f59e0b', QF:'#888' }[r] || '#555'
   return <span style={{ display:'inline-block', background:c+'22', color:c, border:`1px solid ${c}44`, borderRadius:4, padding:'1px 7px', fontSize:11, fontWeight:700, fontFamily:"'DM Mono',monospace", minWidth:28, textAlign:'center' }}>{r}</span>
 }
 
-// Estrai nome e id da una riga ranking — gestisce struttura piatta e annidata
-const extractFromRankRow = (row) => {
-  // Struttura annidata: { position, point, player: { id, name, ... } }
-  if (row.player) return { id: row.player.id, name: row.player.name, rank: row.position }
-  // Struttura piatta: { id, name, currentRank, points }
-  return { id: row.id, name: row.name || row.playerName, rank: row.position || row.currentRank || row.rank }
-}
+// Ricava il nome del torneo da una partita (struttura variabile)
+const getTournamentName = (m) =>
+  m.tournament?.name || m.tournamentName || m.tour?.name ||
+  (m.tournamentId ? `Torneo #${m.tournamentId}` : '–')
+
+// Ricava il nome del torneo da una fixture
+const getFixtureTournament = (f) =>
+  f.tournament?.name || f.tournamentName || (f.tournamentId ? `Torneo #${f.tournamentId}` : '–')
+
+const getFixtureSurface = (f) =>
+  f.tournament?.court?.name || f.court?.name || f.surface || '–'
+
+const getFixtureCategory = (f) =>
+  f.tournament?.rank?.name || f.tournament?.category || f.category || '–'
 
 export default function App() {
   const [players, setPlayers]   = useState([])
@@ -59,44 +64,36 @@ export default function App() {
   const [loading, setLoading]   = useState(true)
   const [initDone, setInitDone] = useState(false)
   const [mock, setMock]         = useState(false)
+  // Debug: mostra struttura raw prima partita e primo titolo
+  const [dbg, setDbg]           = useState('')
 
   useEffect(() => {
     const init = async () => {
       try {
-        // URL confermato dal debug: /rankings/singles (con la s) dà 404,
-        // ma il ranking trovato aveva 101 elementi — l'URL che ha funzionato
-        // è /atp/player con filtro singles, vediamo la struttura reale
-        const res = await get(`${BASE}/atp/ranking/singles?pageSize=100&pageNo=1`)
-        const raw = Array.isArray(res) ? res : (res?.rankings || res?.players || res?.data || [])
-        const list = raw.map(row => row.player ? { id: row.player.id, name: row.player.name, rank: row.position } : { id: row.id, name: row.name || row.playerName, rank: row.position || row.currentRank })
-
+        const res  = await get(`${BASE}/atp/ranking/singles?pageSize=100&pageNo=1`)
+        const raw  = Array.isArray(res) ? res : (res?.rankings || res?.players || res?.data || [])
+        const list = raw.map(row => row.player
+          ? { id: row.player.id, name: row.player.name, rank: row.position, points: row.point }
+          : { id: row.id, name: row.name || row.playerName, rank: row.position || row.currentRank, points: row.points || row.point }
+        )
         const resolved = TARGETS.map(t => {
-          const match = list.find(row => {
-            const { name } = extractFromRankRow(row)
-            return (name || '').toLowerCase().includes(t.surname.toLowerCase())
-          })
-          if (!match) return { ...t, id: null, rank: null }
-          const { id, name, rank } = extractFromRankRow(match)
-          return { ...t, id, name: name || t.name, rank }
+          const match = list.find(r => (r.name||'').toLowerCase().includes(t.surname.toLowerCase()))
+          return match ? { ...t, id: match.id, name: match.name||t.name, rank: match.rank, points: match.points } : { ...t, id:null }
         })
-
         setPlayers(resolved)
         setSel(resolved[0])
-      } catch(e) {
-        setPlayers(TARGETS.map(t => ({ ...t, id: null, rank: null })))
-        setSel({ ...TARGETS[0], id: null })
-      } finally {
-        setInitDone(true)
-      }
+      } catch {
+        setPlayers(TARGETS.map(t => ({ ...t, id:null })))
+        setSel({ ...TARGETS[0], id:null })
+      } finally { setInitDone(true) }
     }
     init()
   }, [])
 
   useEffect(() => {
     if (!sel || !initDone) return
-
     const load = async () => {
-      setLoading(true); setData(null); setMock(false)
+      setLoading(true); setData(null); setMock(false); setDbg('')
       try {
         if (!sel.id) throw new Error('ID non trovato')
         const t = sel.tour
@@ -109,14 +106,28 @@ export default function App() {
         ])
 
         const profile  = pR.status==='fulfilled' ? pR.value : null
-        const titles   = tR.status==='fulfilled' ? (Array.isArray(tR.value)?tR.value:tR.value?.data||[]) : []
-        const past     = mR.status==='fulfilled' ? (Array.isArray(mR.value)?mR.value:mR.value?.data||[]) : []
-        const fixtures = fR.status==='fulfilled' ? (Array.isArray(fR.value)?fR.value:fR.value?.data||[]) : []
+        const titlesRaw = tR.status==='fulfilled' ? tR.value : []
+        const pastRaw   = mR.status==='fulfilled' ? mR.value : []
+        const fixRaw    = fR.status==='fulfilled' ? fR.value : []
+
+        // Normalizza array
+        const titles   = Array.isArray(titlesRaw) ? titlesRaw : (titlesRaw?.titles || titlesRaw?.data || [])
+        const past     = Array.isArray(pastRaw)   ? pastRaw   : (pastRaw?.matches || pastRaw?.data || [])
+        const fixtures = Array.isArray(fixRaw)    ? fixRaw    : (fixRaw?.fixtures || fixRaw?.data || [])
 
         if (!profile) throw new Error('Profilo non trovato')
 
+        // Debug: struttura raw
+        if (past[0])   setDbg(d => d + 'MATCH: ' + JSON.stringify(past[0]).slice(0,120) + '\n')
+        if (titles[0]) setDbg(d => d + 'TITLE: ' + JSON.stringify(titles[0]).slice(0,120) + '\n')
+        if (fixtures[0]) setDbg(d => d + 'FIX: ' + JSON.stringify(fixtures[0]).slice(0,120) + '\n')
+
         const yr    = new Date().getFullYear()
         const slams = ['Australian Open','Roland Garros','Wimbledon','US Open']
+
+        // Titoli: conta per anno e Slam cercando in tutti i campi possibili
+        const getTitleYear = (tl) => tl.year || tl.season || (tl.date ? new Date(tl.date).getFullYear() : 0) || (tl.tournament?.date ? new Date(tl.tournament.date).getFullYear() : 0)
+        const getTitleName = (tl) => tl.tournament?.name || tl.tournamentName || tl.name || ''
 
         setData({
           profile: {
@@ -130,18 +141,19 @@ export default function App() {
           },
           ranking: {
             rank:     profile.currentRank ?? sel.rank ?? '–',
-            points:   profile.points ?? '–',
-            movement: profile.progress ?? 0,
+            // punti: dall'oggetto ranking annidato nel profilo, o dal ranking
+            points:   profile.curRank?.points ?? profile.ranking?.points ?? sel.points ?? '–',
+            movement: profile.progress ?? profile.curRank?.movement ?? 0,
           },
           titles: {
             total:        titles.length || '–',
-            current_year: titles.filter(tl => { const y=tl.year||(tl.date?new Date(tl.date).getFullYear():0); return y===yr }).length,
-            grand_slams:  titles.filter(tl => slams.some(s => (tl.tournament?.name||tl.name||'').includes(s))).length,
+            current_year: titles.filter(tl => getTitleYear(tl) === yr).length,
+            grand_slams:  titles.filter(tl => slams.some(s => getTitleName(tl).includes(s))).length,
           },
           recent: past.slice(0,5).map(m => {
             const won = String(m.player1Id)===String(sel.id)
             return {
-              tournament: m.tournament?.name||'–',
+              tournament: getTournamentName(m),
               result:     won?'W':'L',
               opponent:   won?(m.player2?.name||'–'):(m.player1?.name||'–'),
               score:      m.result||'–',
@@ -149,31 +161,28 @@ export default function App() {
             }
           }),
           upcoming: fixtures.slice(0,3).map(f => ({
-            tournament: f.tournament?.name||'–',
-            surface:    f.tournament?.court?.name||'–',
+            tournament: getFixtureTournament(f),
+            surface:    getFixtureSurface(f),
             start:      f.date||'',
-            category:   f.tournament?.rank?.name||'–',
+            category:   getFixtureCategory(f),
           })),
         })
       } catch {
-        // Fallback dati per giocatore
-        const fallback = {
-          Sinner:     { rank:1,  pts:11330, tot:18, yr:4, slam:2  },
-          Alcaraz:    { rank:3,  pts:8855,  tot:16, yr:2, slam:3  },
-          Djokovic:   { rank:7,  pts:4960,  tot:98, yr:0, slam:24 },
-          Musetti:    { rank:17, pts:2175,  tot:4,  yr:0, slam:0  },
+        setMock(true)
+        const fb = {
+          Sinner:     { rank:1,  pts:14350, tot:22, yr:5, slam:3  },
+          Alcaraz:    { rank:3,  pts:8200,  tot:16, yr:2, slam:3  },
+          Djokovic:   { rank:7,  pts:4200,  tot:98, yr:0, slam:24 },
+          Musetti:    { rank:17, pts:2100,  tot:4,  yr:0, slam:0  },
           Berrettini: { rank:35, pts:1200,  tot:6,  yr:0, slam:0  },
-        }[sel.surname] || { rank:'–', pts:'–', tot:'–', yr:'–', slam:'–' }
+        }[sel.surname] || { rank:'–', pts:'–', tot:'–', yr:0, slam:0 }
         setData({
           profile: { full_name:sel.name, country:'', birth_date:'', height:'', plays:'', turned_pro:'', coach:'' },
-          ranking: { rank:fallback.rank, points:fallback.pts, movement:0 },
-          titles:  { total:fallback.tot, current_year:fallback.yr, grand_slams:fallback.slam },
+          ranking: { rank:fb.rank, points:fb.pts, movement:0 },
+          titles:  { total:fb.tot, current_year:fb.yr, grand_slams:fb.slam },
           recent:[], upcoming:[],
         })
-        setMock(true)
-      } finally {
-        setLoading(false)
-      }
+      } finally { setLoading(false) }
     }
     load()
   }, [sel, initDone])
@@ -209,6 +218,9 @@ export default function App() {
           ))}
         </div>
       </div>
+
+      {/* Debug strip — mostra struttura raw */}
+      {dbg && <pre style={{ padding:'6px 20px', fontSize:9, color:'#2a2a2a', fontFamily:'monospace', whiteSpace:'pre-wrap', wordBreak:'break-all', borderBottom:'1px solid #0d0d0d' }}>{dbg}</pre>}
 
       <div style={{ padding:'0 20px' }}>
         {loading && <div style={{ textAlign:'center', padding:60, color:'#333' }}><div style={{ fontSize:28, marginBottom:12 }}>⏳</div><div style={{ fontSize:13 }}>Caricamento...</div></div>}

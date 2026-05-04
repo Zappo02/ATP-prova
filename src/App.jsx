@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 // ─── CONFIGURAZIONE ──────────────────────────────────────────────────────────
 // Inserisci qui la tua chiave RapidAPI dopo essersi iscritto su:
 // https://rapidapi.com/jjrm365-kIFr3Nx_odV/api/tennis-api-atp-wta-itf
-const RAPIDAPI_KEY = import.meta.env.VITE_RAPIDAPI_KEY || 61137ff3cfmsh3c349b4d3d87940p139f00jsn9c74e5c883b9
+const RAPIDAPI_KEY = '61137ff3cfmsh3c349b4d3d87940p139f00jsn9c74e5c883b9'
 const API_HOST = 'tennis-api-atp-wta-itf.p.rapidapi.com'
 const BASE_URL = 'https://tennis-api-atp-wta-itf.p.rapidapi.com/tennis/v2'
 
@@ -471,3 +471,4 @@ export default function App() {
     </div>
   )
 }
+

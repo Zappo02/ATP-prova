@@ -1,341 +1,56 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 
-// ─── CONFIGURAZIONE ──────────────────────────────────────────────────────────
 const RAPIDAPI_KEY = '61137ff3cfmsh3c349b4d3d87940p139f00jsn9c74e5c883b9'
 const API_HOST = 'tennis-api-atp-wta-itf.p.rapidapi.com'
-const BASE_URL = 'https://tennis-api-atp-wta-itf.p.rapidapi.com/tennis/v2'
 
-// ─── ROSTER GIOCATORI ────────────────────────────────────────────────────────
-// IDs verificati dalla documentazione ufficiale API (Alcaraz=104925, Sinner=106421)
-const PLAYERS = [
-  { id: 106421, name: 'Jannik Sinner',     country: 'ITA', flag: '🇮🇹', tour: 'atp' },
-  { id: 104925, name: 'Carlos Alcaraz',    country: 'ESP', flag: '🇪🇸', tour: 'atp' },
-  { id: 100644, name: 'Novak Djokovic',    country: 'SRB', flag: '🇷🇸', tour: 'atp' },
-  { id: 102148, name: 'Rafael Nadal',      country: 'ESP', flag: '🇪🇸', tour: 'atp' },
-  { id: 103819, name: 'Lorenzo Musetti',   country: 'ITA', flag: '🇮🇹', tour: 'atp' },
-  { id: 105526, name: 'Matteo Berrettini', country: 'ITA', flag: '🇮🇹', tour: 'atp' },
-]
-
-// ─── HELPERS ─────────────────────────────────────────────────────────────────
-const apiFetch = async (endpoint) => {
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    headers: {
-      'X-RapidAPI-Key': RAPIDAPI_KEY,
-      'X-RapidAPI-Host': API_HOST,
-    },
-  })
-  if (!res.ok) throw new Error(`API error ${res.status}`)
-  return res.json()
-}
-
-const fmtDate = (str) => {
-  if (!str) return '–'
-  const d = new Date(str)
-  return isNaN(d) ? str : d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' })
-}
-
-// ─── MOCK DATA ────────────────────────────────────────────────────────────────
-const MOCK_DATA = {
-  profile: { full_name: 'Jannik Sinner', country: 'Italy', birth_date: '2001-08-16', height: 188, plays: 'Destro', turned_pro: 2018, coach: 'Simone Vagnozzi' },
-  ranking: { rank: 1, points: 11330, movement: 0 },
-  titles: { total: 18, current_year: 4, grand_slams: 2 },
-  recent: [
-    { tournament: 'Australian Open', result: 'W', opponent: 'Zverev A.', score: '6-3 7-6 6-3', date: '2025-01-26' },
-    { tournament: 'US Open', result: 'W', opponent: 'Fritz T.', score: '6-3 6-4 7-5', date: '2024-09-08' },
-    { tournament: 'Rotterdam', result: 'W', opponent: 'De Minaur A.', score: '7-5 6-4', date: '2025-02-09' },
-    { tournament: 'Miami Open', result: 'L', opponent: 'Alcaraz C.', score: '2-6 6-7', date: '2024-04-07' },
-    { tournament: 'Cincinnati', result: 'L', opponent: 'Fritz T.', score: '4-6 4-6', date: '2024-08-17' },
-  ],
-  upcoming: [
-    { tournament: "Internazionali BNL d'Italia", surface: 'Clay', start: '2025-05-07', category: 'Masters 1000' },
-    { tournament: 'Roland Garros', surface: 'Clay', start: '2025-05-25', category: 'Grand Slam' },
-    { tournament: 'Wimbledon', surface: 'Grass', start: '2025-06-30', category: 'Grand Slam' },
-  ],
-  prize_money: '',
-}
-
-// ─── COMPONENTI UI ───────────────────────────────────────────────────────────
-const Pill = ({ label, value, color = '#00c896' }) => (
-  <div style={{ background: '#0a0a0a', border: `1px solid ${color}22`, borderRadius: 8, padding: '12px 16px', textAlign: 'center', flex: 1, minWidth: 90 }}>
-    <div style={{ color, fontSize: 22, fontWeight: 700, fontFamily: "'DM Mono', monospace", letterSpacing: -1 }}>{value}</div>
-    <div style={{ color: '#666', fontSize: 11, marginTop: 3, textTransform: 'uppercase', letterSpacing: 1 }}>{label}</div>
-  </div>
-)
-
-const Section = ({ title, children }) => (
-  <div style={{ marginTop: 24 }}>
-    <div style={{ fontSize: 11, color: '#444', textTransform: 'uppercase', letterSpacing: 2, marginBottom: 12, paddingBottom: 8, borderBottom: '1px solid #1a1a1a' }}>
-      {title}
-    </div>
-    {children}
-  </div>
-)
-
-const ResultBadge = ({ r }) => {
-  const colors = { W: '#00c896', L: '#ff4444', F: '#f59e0b', SF: '#f59e0b', QF: '#888' }
-  const color = colors[r] || '#555'
-  return (
-    <span style={{ display: 'inline-block', background: color + '22', color, border: `1px solid ${color}44`, borderRadius: 4, padding: '1px 7px', fontSize: 11, fontWeight: 700, fontFamily: "'DM Mono', monospace", minWidth: 28, textAlign: 'center' }}>
-      {r}
-    </span>
-  )
-}
-
-// ─── APP PRINCIPALE ───────────────────────────────────────────────────────────
 export default function App() {
-  const [selectedPlayer, setSelectedPlayer] = useState(PLAYERS[0])
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-  const [usingMock, setUsingMock] = useState(false)
-
-  const loadPlayer = useCallback(async (player) => {
-    setLoading(true)
-    setError(null)
-    setData(null)
-    setUsingMock(false)
-
-    try {
-      const t = player.tour
-
-      // Endpoint corretti dalla documentazione ufficiale matchstat
-      const [profileRes, titlesRes, pastRes, fixRes] = await Promise.allSettled([
-        apiFetch(`/${t}/player/profile/${player.id}?include=ranking,country`),
-        apiFetch(`/${t}/player/titles/${player.id}`),
-        apiFetch(`/${t}/player/past-matches/${player.id}?pageSize=5`),
-        apiFetch(`/${t}/fixtures/player/${player.id}?include=tournament,round&pageSize=3`),
-      ])
-
-      const profile = profileRes.status === 'fulfilled' ? profileRes.value : null
-      if (!profile) throw new Error(`Profilo non trovato per ID ${player.id}`)
-
-      const titlesRaw = titlesRes.status === 'fulfilled' ? titlesRes.value : []
-      const pastRaw   = pastRes.status === 'fulfilled'   ? pastRes.value   : []
-      const fixRaw    = fixRes.status === 'fulfilled'    ? fixRes.value    : []
-
-      const titlesList  = Array.isArray(titlesRaw) ? titlesRaw : (titlesRaw?.data || [])
-      const pastMatches = Array.isArray(pastRaw)   ? pastRaw   : (pastRaw?.data   || [])
-      const fixtures    = Array.isArray(fixRaw)    ? fixRaw    : (fixRaw?.data    || [])
-
-      const currentYear = new Date().getFullYear()
-      const titlesThisYear = titlesList.filter(tl => {
-        const y = tl.year || (tl.date ? new Date(tl.date).getFullYear() : 0)
-        return y === currentYear
-      }).length
-      const grandSlamNames = ['Australian Open', 'Roland Garros', 'Wimbledon', 'US Open']
-      const grandSlams = titlesList.filter(tl =>
-        grandSlamNames.some(gs => (tl.tournament?.name || tl.name || '').includes(gs))
-      ).length
-
-      setData({
-        profile: {
-          full_name: profile.name || player.name,
-          country: profile.country?.name || profile.countryAcr || player.country,
-          birth_date: profile.birthday || '',
-          height: profile.height || '',
-          plays: profile.plays || profile.hand || '',
-          turned_pro: profile.turnedPro || '',
-          coach: profile.coach || '',
-        },
-        ranking: {
-          rank: profile.currentRank ?? '–',
-          points: profile.points ?? '–',
-          movement: profile.progress ?? 0,
-        },
-        titles: {
-          total: titlesList.length || '–',
-          current_year: titlesThisYear,
-          grand_slams: grandSlams || '–',
-        },
-        // In past-matches player1 = VINCITORE (convenzione API)
-        recent: pastMatches.slice(0, 5).map(m => {
-          const won = String(m.player1Id) === String(player.id)
-          return {
-            tournament: m.tournament?.name || '–',
-            result: won ? 'W' : 'L',
-            opponent: won ? (m.player2?.name || '–') : (m.player1?.name || '–'),
-            score: m.result || '–',
-            date: m.date || '',
-          }
-        }),
-        upcoming: fixtures.slice(0, 3).map(f => ({
-          tournament: f.tournament?.name || '–',
-          surface: f.tournament?.court?.name || '–',
-          start: f.date || '',
-          category: f.tournament?.rank?.name || '–',
-        })),
-        prize_money: profile.prizeMoney || '',
-      })
-
-    } catch (err) {
-      console.error('API error:', err)
-      setData(MOCK_DATA)
-      setUsingMock(true)
-      setError(`Errore API: ${err.message} — dati demo visualizzati`)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const [log, setLog] = useState([])
 
   useEffect(() => {
-    loadPlayer(selectedPlayer)
-  }, [selectedPlayer, loadPlayer])
+    const run = async () => {
+      const tests = [
+        'https://tennis-api-atp-wta-itf.p.rapidapi.com/tennis/v2/atp/player/profile/106421',
+        'https://tennis-api-atp-wta-itf.p.rapidapi.com/tennis/v2/atp/player?pageSize=2',
+        'https://tennis-api-atp-wta-itf.p.rapidapi.com/tennis/v2/atp/fixtures',
+      ]
+
+      for (const url of tests) {
+        try {
+          const res = await fetch(url, {
+            headers: {
+              'X-RapidAPI-Key': RAPIDAPI_KEY,
+              'X-RapidAPI-Host': API_HOST,
+            },
+          })
+          const text = await res.text()
+          setLog(l => [...l, `[${res.status}] ${url.split('v2/')[1]}\n${text.slice(0, 300)}`])
+        } catch (e) {
+          setLog(l => [...l, `[ERR] ${url.split('v2/')[1]}\n${e.message}`])
+        }
+      }
+    }
+    run()
+  }, [])
 
   return (
-    <div style={{ fontFamily: "'DM Sans', -apple-system, sans-serif", background: '#050505', color: '#e8e8e8', minHeight: '100vh', padding: '0 0 40px' }}>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        .player-btn { transition: all .15s; }
-        .player-btn:hover { border-color: #00c89644 !important; background: #0d1f1a !important; }
-        .match-row:hover { background: #0d0d0d !important; }
-      `}</style>
-
-      {/* Header */}
-      <div style={{ borderBottom: '1px solid #111', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ fontSize: 18 }}>🎾</span>
-        <span style={{ fontSize: 13, color: '#444', letterSpacing: 1, textTransform: 'uppercase' }}>Tennis Player Stats</span>
-        {usingMock && (
-          <span style={{ marginLeft: 'auto', fontSize: 10, background: '#f59e0b22', color: '#f59e0b', border: '1px solid #f59e0b33', borderRadius: 4, padding: '2px 8px' }}>
-            DEMO
-          </span>
-        )}
-      </div>
-
-      {/* Player selector */}
-      <div style={{ padding: '16px 20px', overflowX: 'auto' }}>
-        <div style={{ display: 'flex', gap: 8, minWidth: 'max-content' }}>
-          {PLAYERS.map(p => (
-            <button key={p.id} className="player-btn" onClick={() => setSelectedPlayer(p)} style={{
-              background: selectedPlayer.id === p.id ? '#0d1f1a' : 'transparent',
-              border: `1px solid ${selectedPlayer.id === p.id ? '#00c896' : '#1a1a1a'}`,
-              color: selectedPlayer.id === p.id ? '#00c896' : '#666',
-              borderRadius: 8, padding: '6px 14px', cursor: 'pointer', fontSize: 13,
-              whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 6,
-            }}>
-              <span>{p.flag}</span>
-              <span>{p.name.split(' ').pop()}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Content */}
-      <div style={{ padding: '0 20px' }}>
-        {loading && (
-          <div style={{ textAlign: 'center', padding: 60, color: '#333' }}>
-            <div style={{ fontSize: 28, marginBottom: 12 }}>⏳</div>
-            <div style={{ fontSize: 13 }}>Caricamento dati...</div>
-          </div>
-        )}
-
-        {error && (
-          <div style={{ background: '#1a0a0a', border: '1px solid #ff444422', borderRadius: 8, padding: 12, color: '#ff6666', fontSize: 12, marginBottom: 12 }}>
-            ⚠️ {error}
-          </div>
-        )}
-
-        {data && !loading && (
-          <>
-            {/* Player header */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '20px 0 0' }}>
-              <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#0d1f1a', border: '2px solid #00c89633', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, flexShrink: 0 }}>
-                {selectedPlayer.flag}
-              </div>
-              <div>
-                <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: -0.5 }}>
-                  {data.profile.full_name}
-                </div>
-                <div style={{ fontSize: 12, color: '#444', marginTop: 2 }}>
-                  {data.profile.country}
-                  {data.profile.birth_date && ` · Nato il ${fmtDate(data.profile.birth_date)}`}
-                  {data.profile.height && ` · ${data.profile.height} cm`}
-                </div>
-              </div>
-            </div>
-
-            {/* Stat pills */}
-            <Section title="Classifica & statistiche">
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <Pill label="Ranking ATP" value={`#${data.ranking.rank}`} color="#00c896" />
-                <Pill label="Punti" value={typeof data.ranking.points === 'number' ? data.ranking.points.toLocaleString('it-IT') : data.ranking.points} color="#00c896" />
-                <Pill label="Titoli totali" value={data.titles.total} color="#f59e0b" />
-                <Pill label="Titoli 2025" value={data.titles.current_year} color="#f59e0b" />
-                <Pill label="Slam" value={data.titles.grand_slams} color="#f59e0b" />
-              </div>
-              {data.ranking.movement !== 0 && (
-                <div style={{ marginTop: 10, fontSize: 12, color: data.ranking.movement > 0 ? '#00c896' : '#ff4444' }}>
-                  {data.ranking.movement > 0 ? '▲' : '▼'} {Math.abs(data.ranking.movement)} posizioni questa settimana
-                </div>
-              )}
-            </Section>
-
-            {/* Ultimi risultati */}
-            {data.recent?.length > 0 && (
-              <Section title="Ultimi risultati">
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {data.recent.map((m, i) => (
-                    <div key={i} className="match-row" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 6, fontSize: 13 }}>
-                      <ResultBadge r={m.result} />
-                      <span style={{ color: '#ccc', flex: 1 }}>{m.tournament}</span>
-                      <span style={{ color: '#555', fontSize: 12 }}>vs {m.opponent}</span>
-                      {m.score && m.score !== '–' && (
-                        <span style={{ color: '#333', fontSize: 11, fontFamily: "'DM Mono', monospace" }}>{m.score}</span>
-                      )}
-                      {m.date && <span style={{ color: '#2a2a2a', fontSize: 11 }}>{fmtDate(m.date)}</span>}
-                    </div>
-                  ))}
-                </div>
-              </Section>
-            )}
-
-            {/* Prossimi tornei */}
-            {data.upcoming?.length > 0 && (
-              <Section title="Prossimi tornei">
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {data.upcoming.map((t, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', background: '#0a0a0a', border: '1px solid #111', borderRadius: 8 }}>
-                      <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, color: '#ccc' }}>{t.tournament}</div>
-                        <div style={{ fontSize: 11, color: '#444', marginTop: 2 }}>
-                          {t.category}{t.surface && t.surface !== '–' && ` · ${t.surface}`}
-                        </div>
-                      </div>
-                      {t.start && (
-                        <div style={{ fontSize: 12, color: '#00c89688', fontFamily: "'DM Mono', monospace", whiteSpace: 'nowrap' }}>
-                          {fmtDate(t.start)}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </Section>
-            )}
-
-            {/* Profilo */}
-            {(data.profile.plays || data.profile.turned_pro || data.profile.coach) && (
-              <Section title="Profilo">
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {[['Gioco', data.profile.plays], ['Pro dal', data.profile.turned_pro], ['Coach', data.profile.coach]]
-                    .filter(([, v]) => v)
-                    .map(([k, v]) => (
-                      <div key={k} style={{ display: 'flex', gap: 12, fontSize: 13 }}>
-                        <span style={{ color: '#333', minWidth: 80 }}>{k}</span>
-                        <span style={{ color: '#999' }}>{v}</span>
-                      </div>
-                    ))}
-                </div>
-              </Section>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Footer */}
-      <div style={{ marginTop: 32, padding: '16px 20px 0', borderTop: '1px solid #0d0d0d', display: 'flex', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 11, color: '#222' }}>universosportivo.com</span>
-        <span style={{ fontSize: 11, color: '#222' }}>Dati via Tennis API · RapidAPI</span>
-      </div>
+    <div style={{ fontFamily: 'monospace', background: '#050505', color: '#e8e8e8', padding: 20, minHeight: '100vh' }}>
+      <h2 style={{ color: '#00c896', marginBottom: 16 }}>🔍 API Debug</h2>
+      {log.length === 0 && <p style={{ color: '#666' }}>Testing...</p>}
+      {log.map((entry, i) => (
+        <pre key={i} style={{
+          background: '#0a0a0a',
+          border: `1px solid ${entry.startsWith('[200]') ? '#00c89633' : '#ff444433'}`,
+          color: entry.startsWith('[200]') ? '#00c896' : '#ff6666',
+          padding: 12,
+          borderRadius: 8,
+          marginBottom: 12,
+          fontSize: 11,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-all',
+        }}>
+          {entry}
+        </pre>
+      ))}
     </div>
   )
 }

@@ -180,8 +180,7 @@ export default function App() {
         // Titoli anno corrente: conta W nel dataset partite (round finale = W con nessun avversario successivo)
         // Approssimazione semplice: usa perf anno corrente
         const perfCY = perf?.[String(CY)] || perf?.[String(CY-1)] || {}
-        const titlesYear = perfCY?.level?.mainTour?.titlesWon ?? 
-                           Object.values(perfCY?.level||{}).reduce((s,v)=>s+(v?.titlesWon||0),0) || 0
+        const titlesYear = (perfCY?.level?.mainTour?.titlesWon) ?? (Object.values(perfCY?.level||{}).reduce((s,v)=>s+(v?.titlesWon||0),0) || 0)
 
         // Prossimi tornei
         const fixtures = Array.isArray(fixRaw) ? fixRaw : (fixRaw?.fixtures||fixRaw?.data||[])
